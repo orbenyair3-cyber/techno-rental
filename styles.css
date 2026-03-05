@@ -150,6 +150,38 @@ button,.btn{
 .top-nav{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;padding:10px}
 .top-nav a{background:#fff;padding:7px 10px;border-radius:10px;text-decoration:none;color:#1f2a37}
 
+/* Booking calendar marker highlights */
+.flatpickr-day.day-cell{
+  border-radius:10px;
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+  transition:transform .15s ease, box-shadow .2s ease;
+}
+.flatpickr-day.day-cell::before{
+  content:'';
+  position:absolute;
+  inset:3px;
+  border-radius:8px;
+  pointer-events:none;
+  z-index:-1;
+}
+.flatpickr-day.day-available::before{background:rgba(56, 189, 248, 0.28)}
+.flatpickr-day.day-booked::before{background:rgba(248, 113, 113, 0.28)}
+.flatpickr-day.day-booked{ text-decoration:line-through; text-decoration-thickness:1.5px; }
+.flatpickr-day.inRange::before,
+.flatpickr-day.startRange::before,
+.flatpickr-day.endRange::before,
+.flatpickr-day.selected::before{background:rgba(156,163,175,0.30)}
+.flatpickr-day.day-cell:hover:not(.flatpickr-disabled){transform:translateY(-1px);box-shadow:0 2px 8px rgba(0,0,0,.12)}
+
+.calendar-legend{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0 2px;font-size:.92rem;color:#374151}
+.calendar-legend span{display:flex;align-items:center;gap:6px}
+.legend-box{display:inline-block;width:16px;height:16px;border-radius:6px;border:1px solid rgba(0,0,0,.08)}
+.legend-available{background:rgba(56, 189, 248, 0.28)}
+.legend-booked{background:rgba(248, 113, 113, 0.28)}
+.legend-selected{background:rgba(156,163,175,0.30)}
+
 .site-footer,footer{text-align:center;color:#4b5563;padding:26px 12px}
 .logo-circle{width:62px;height:62px;border-radius:50%;object-fit:cover;margin-bottom:8px}
 .admin-hidden-link{font-size:12px;opacity:.6;color:#6b7280;text-decoration:none}

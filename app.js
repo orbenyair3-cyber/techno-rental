@@ -134,7 +134,12 @@ function renderSchedule(){
     const t=all.find(x=>x.id===s.value)||all[0];
     $('toolStatus').textContent = t.status==='maintenance' ? 'בתחזוקה' : 'פנוי';
     if(fp) fp.destroy();
-    fp=flatpickr(picker,{mode:'range',dateFormat:'Y-m-d',minDate:'today',disable:[d=>t.status==='maintenance'||bookedDatesSet.has(ymd(d))],defaultDate:selectedDates.length?[selectedDates[0],selectedDates[selectedDates.length-1]]:null,onChange:(arr)=>{
+    fp=flatpickr(picker,{mode:'range',dateFormat:'Y-m-d',minDate:'today',disable:[d=>t.status==='maintenance'||bookedDatesSet.has(ymd(d))],defaultDate:selectedDates.length?[selectedDates[0],selectedDates[selectedDates.length-1]]:null,onDayCreate:(_d,_s,_fp,dayElem)=>{
+      const key=ymd(dayElem.dateObj);
+      dayElem.classList.add('day-cell');
+      if(bookedDatesSet.has(key)) dayElem.classList.add('day-booked');
+      else dayElem.classList.add('day-available');
+    },onChange:(arr)=>{
       if(arr.length===2){
         const start=ymd(arr[0]),end=ymd(arr[1]);
         const next=expandDateRange(start,end);
@@ -188,7 +193,8 @@ function renderPayment(){
       start_date:selectedSorted[0],
       end_date:selectedSorted[selectedSorted.length-1],
       customer_name:$('invoiceName').value.trim(),
-      customer_phone:$('customerPhone').value.trim()
+      customer_phone:$('customerPhone').value.trim(),
+      customer_email:$('customerEmail').value.trim()
     };
     $('confirmPayment').disabled=true;
     const orders=await fetchOrdersFromServer();
@@ -207,6 +213,11 @@ function renderPayment(){
     }
     if(sent.status===409){
       $('paymentMsg').textContent='התאריכים שנתבחרו כבר נתפסו. נא לבחור תאריכים אחרים.';
+      $('paymentMsg').style.color='#dc3545';
+      return;
+    }
+    if(sent.message){
+      $('paymentMsg').textContent=`שגיאת שרת: ${sent.message}`;
       $('paymentMsg').style.color='#dc3545';
       return;
     }
