@@ -25,6 +25,7 @@
         <button class="admin-tab-btn secondary" data-tab="edit">עריכת כלי</button>
         <button class="admin-tab-btn secondary" data-tab="availability">זמינות כלי</button>
         <button class="admin-tab-btn secondary" data-tab="maintenance">תחזוקה</button>
+        <button class="admin-tab-btn secondary" data-tab="orders">ניהול הזמנות</button>
         <button id="adminLogoutBtn" class="secondary">התנתקות</button>
       </div>
 
@@ -71,6 +72,28 @@
           <div><label for="maintStatus">סטטוס</label><select id="maintStatus"><option value="available">זמין</option><option value="maintenance">בתחזוקה</option></select></div>
         </div>
         <button id="saveMaintBtn" class="primary">שמור תחזוקה</button>
+      </div>
+
+      <div id="tab-orders" class="admin-tab hidden">
+        <div class="actions">
+          <button id="refreshOrdersBtn" class="secondary">רענן הזמנות</button>
+        </div>
+        <div style="overflow:auto">
+          <table id="ordersTable" class="table">
+            <thead>
+              <tr>
+                <th>כלי</th>
+                <th>מתאריך</th>
+                <th>עד תאריך</th>
+                <th>שם לקוח</th>
+                <th>טלפון</th>
+                <th>סטטוס</th>
+                <th>פעולות</th>
+              </tr>
+            </thead>
+            <tbody id="ordersTableBody"></tbody>
+          </table>
+        </div>
       </div>
 
       <p id="adminActionMsg" class="small"></p>

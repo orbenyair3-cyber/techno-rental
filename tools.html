@@ -1,10 +1,49 @@
-<!doctype html><html lang='he' dir='rtl'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>כל הכלים</title><link rel='stylesheet' href='styles.css'></head><body data-page='catalog'><header class='hero'><div class='container'><h1>כל הכלים</h1></div></header>
-<nav class='top-nav'>
-  <a href='index.html'>כלים להשכרה</a>
-  <a href='about.html'>אודות</a>
-  <a href='how-it-works.html'>איך זה עובד</a>
-  <a href='contact.html'>יצירת קשר</a>
-  <a href='terms.html'>תנאי שימוש</a>
-  <a href='privacy.html'>פרטיות</a>
-</nav>
-<main class='container'><section id='toolsGrid' class='grid'></section><section class='panel'><div class='line-between'><h3>סל השכרה</h3><span id='cartCount' class='pill'>0</span></div><div id='cartItems' class='list'></div><div class='actions'><button id='clearCartBtn' class='secondary'>נקה סל</button><a class='btn primary' href='schedule.html'>המשך לזמינות</a></div></section></main><footer>© Techno Electric</footer><button id='accessBtn' class='access-btn'>♿</button><aside id='accessPanel' class='access-panel'></aside><script src='app.js'></script></body></html>
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>כלים להשכרה | Techno Electric</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="catalog">
+  <header class="site-header">
+    <div class="container header-row">
+      <img src="assets/logo-main.png" alt="Techno Electric" class="logo-main">
+      <nav class="main-nav" aria-label="ניווט ראשי">
+        <a href="index.html">בית</a>
+        <a href="tools.html">כלים</a>
+        <a href="how-it-works.html">איך זה עובד</a>
+        <a href="contact.html">צור קשר</a>
+        <a href="my-orders.html">ההזמנות שלי</a>
+      </nav>
+      <span class="location-badge">נשר, ישראל</span>
+    </div>
+  </header>
+
+  <main class="container section-block">
+    <div class="section-head">
+      <h1>כלים זמינים להשכרה</h1>
+      <p class="small">בחרו כלי, בדקו זמינות והזמינו בקלות</p>
+    </div>
+
+    <section class="panel">
+      <label for="toolSearch">חיפוש כלי</label>
+      <input id="toolSearch" placeholder="למשל: פטישון נטען / גנרטור">
+    </section>
+
+    <section id="toolsGrid" class="grid"></section>
+  </main>
+
+  <footer class="site-footer">
+    <img src="assets/logo-circle.png" alt="TE" class="logo-circle">
+    <p>Techno Electric – השכרת ציוד מקצועי</p>
+    <p>נשר, ישראל</p>
+    <p>Since 1992</p>
+  </footer>
+
+  <button id="accessBtn" class="access-btn" aria-label="נגישות">♿</button>
+  <aside id="accessPanel" class="access-panel"></aside>
+  <script src="app.js"></script>
+</body>
+</html>

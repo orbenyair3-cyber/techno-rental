@@ -28,11 +28,42 @@ async function saveToolsEverywhere(t){
     return r.ok;
   }catch{return false}
 }
+async function fetchOrdersFromServer(){
+  try{
+    const r=await fetch(`${API_BASE}/api/orders`,{headers:{'Accept':'application/json'}});
+    if(!r.ok) return [];
+    const rows=await r.json();
+    return Array.isArray(rows)?rows:[];
+  }catch{return []}
+}
+async function updateOrderStatusOnServer(orderId,status){
+  try{
+    const r=await fetch(`${API_BASE}/api/orders/${encodeURIComponent(orderId)}`,{method:'PUT',headers:{'Content-Type':'application/json','Accept':'application/json'},body:j({status})});
+    return r.ok;
+  }catch{return false}
+}
+const expandDateRange=(start,end)=>{
+  if(!start||!end) return [];
+  const out=[];
+  const d1=new Date(start+'T00:00:00');
+  const d2=new Date(end+'T00:00:00');
+  const from=d1<=d2?d1:d2, to=d1<=d2?d2:d1;
+  const cur=new Date(from);
+  while(cur<=to){ out.push(ymd(cur)); cur.setDate(cur.getDate()+1); }
+  return out;
+};
+const rangesOverlap=(aStart,aEnd,bStart,bEnd)=>aStart<=bEnd&&aEnd>=bStart;
 async function sendOrderToAdmin(payload){
   try{
     const r=await fetch(`${API_BASE}/api/orders`,{method:'POST',headers:{'Content-Type':'application/json'},body:j(payload)});
-    return r.ok;
-  }catch{return false}
+    if(!r.ok){
+      let msg='';
+      try{const x=await r.json(); msg=x?.error||'';}catch{}
+      return {ok:false,status:r.status,message:msg};
+    }
+    const data=await r.json();
+    return {ok:true,status:r.status,data};
+  }catch{return {ok:false,status:0,message:'network_error'}}
 }
 
 function initTopActions(){
@@ -52,7 +83,8 @@ function renderCatalog(){
     g.innerHTML='';
     tools().filter(t=>!filter||t.name.includes(filter)).forEach(x=>{
       const d=document.createElement('article'); d.className='card';
-      d.innerHTML=`<img src='${x.image}' alt='${x.name}'><div class='card-content'><h3>${x.name}</h3><p>${x.desc}</p><span class='pill'>${x.price} ש"ח</span><div class='actions'><button class='primary choose' data-id='${x.id}'>בחירה והמשך לזמינות</button></div></div>`;
+      const isAvailable=x.status!=='maintenance';
+      d.innerHTML=`<img src='${x.image}' alt='${x.name}'><div class='card-content'><h3>${x.name}</h3><div class='tool-meta'><span class='price-day'>₪${x.price} ליום</span><span class='status-badge ${isAvailable?'status-available':'status-maintenance'}'>${isAvailable?'זמין':'בתחזוקה'}</span></div><p>${x.desc}</p><div class='actions'><button class='primary choose' data-id='${x.id}' ${isAvailable?'':'disabled'}>הזמן עכשיו</button></div></div>`;
       g.appendChild(d);
     });
     g.querySelectorAll('.choose').forEach(b=>b.onclick=()=>{
@@ -79,60 +111,65 @@ const ymd=(d)=>{
 };
 const uniqueDates=arr=>Array.from(new Set((arr||[]).filter(Boolean))).sort();
 function renderSchedule(){
-  const s=$('selectedTool'),cg=$('calendarGrid'); if(!s||!cg)return;
+  const s=$('selectedTool'),picker=$('dateRangePicker'); if(!s||!picker)return;
   $('cartSummary').textContent='בחרו תאריך לכלי הנבחר';
   const fillTools=()=>{const all=tools(); s.innerHTML=all.map(x=>`<option value='${x.id}'>${x.name}</option>`).join('');};
   fillTools();
   const b=booking(); if(b.toolId)s.value=b.toolId; $('pickupType').value=b.pickupType||'בת שלמה';
-  const buildRange=(start,end)=>{
-    if(!start||!end) return [];
-    const out=[];
-    const d1=new Date(start+'T00:00:00');
-    const d2=new Date(end+'T00:00:00');
-    const from=d1<=d2?d1:d2, to=d1<=d2?d2:d1;
-    const cur=new Date(from);
-    while(cur<=to){ out.push(ymd(cur)); cur.setDate(cur.getDate()+1); }
-    return out;
-  };
   let selectedDates = Array.isArray(b.selectedDates) ? [...b.selectedDates].sort() : [];
-  let rangeStart = selectedDates[0] || null;
-  let rangeEnd = selectedDates[selectedDates.length-1] || null;
+  let bookedRanges=[];
+  let bookedDatesSet=new Set();
+  let fp=null;
 
-  const paint=()=>{
+  const setSelectedLabel=()=>{$('selectedDatesLabel').textContent = selectedDates.length ? `${selectedDates[0]} עד ${selectedDates[selectedDates.length-1]}` : 'לא נבחר';};
+  const setBookedRangesLabel=()=>{
+    const lbl=$('bookedRangesLabel'); if(!lbl) return;
+    lbl.textContent=bookedRanges.length?bookedRanges.map(r=>`${r.start_date} עד ${r.end_date}`).join(' | '):'אין כרגע';
+  };
+  const hasConflict=(dates)=>dates.some(d=>bookedDatesSet.has(d));
+  const applyCalendar=()=>{
     const all=tools();
-    if(!all.length){ cg.innerHTML='<p class="small">אין כלים זמינים</p>'; return; }
+    if(!all.length) return;
     if(!s.value || !all.find(x=>x.id===s.value)) s.value=all[0].id;
     const t=all.find(x=>x.id===s.value)||all[0];
     $('toolStatus').textContent = t.status==='maintenance' ? 'בתחזוקה' : 'פנוי';
-    cg.innerHTML='';
-    const start=new Date();
-    for(let i=0;i<42;i++){
-      const d=new Date(start); d.setDate(start.getDate()+i); const key=ymd(d);
-      const c=document.createElement('button'); c.type='button'; c.className='cal-day'; c.textContent=`${d.getDate()}/${d.getMonth()+1}`;
-      if(t.status==='maintenance') c.classList.add('cal-maint');
-      if((t.busyDates||[]).includes(key)) c.classList.add('cal-busy');
-      if(selectedDates.includes(key)) c.classList.add('cal-selected');
-      c.disabled = (t.status==='maintenance') || (t.busyDates||[]).includes(key);
-      c.onclick=()=>{
-        if(!rangeStart){
-          rangeStart=key; rangeEnd=key;
-        }else if(rangeStart && rangeEnd && rangeStart===rangeEnd){
-          rangeEnd=key;
-        }else{
-          rangeStart=key; rangeEnd=key;
+    if(fp) fp.destroy();
+    fp=flatpickr(picker,{mode:'range',dateFormat:'Y-m-d',minDate:'today',disable:[d=>t.status==='maintenance'||bookedDatesSet.has(ymd(d))],defaultDate:selectedDates.length?[selectedDates[0],selectedDates[selectedDates.length-1]]:null,onChange:(arr)=>{
+      if(arr.length===2){
+        const start=ymd(arr[0]),end=ymd(arr[1]);
+        const next=expandDateRange(start,end);
+        if(hasConflict(next)){
+          selectedDates=[];
+          setSelectedLabel();
+          fp.clear();
+          alert('לא ניתן לבחור טווח תאריכים החופף להזמנה קיימת.');
+          return;
         }
-        selectedDates = buildRange(rangeStart, rangeEnd);
-        paint();
-      };
-      cg.appendChild(c);
-    }
-    $('selectedDatesLabel').textContent = selectedDates.length ? `${selectedDates[0]} עד ${selectedDates[selectedDates.length-1]}` : 'לא נבחר';
+        selectedDates=next;
+      }else if(arr.length===1){
+        selectedDates=[ymd(arr[0])];
+      }else selectedDates=[];
+      setSelectedLabel();
+    }});
+    setSelectedLabel();
   };
-  s.addEventListener('change',paint);
-  $('saveSchedule').onclick=()=>{saveBooking({toolId:s.value,selectedDates,pickupType:$('pickupType').value,cart:cart()}); alert('נשמר בהצלחה');};
-  window.addEventListener('tools-updated',()=>{fillTools();paint();});
-  setInterval(async ()=>{const ok=await syncToolsFromServer(); if(ok){fillTools(); paint();}},30000);
-  paint();
+  const refreshOrdersForTool=async ()=>{
+    const rows=await fetchOrdersFromServer();
+    bookedRanges=rows.filter(o=>o.tool_id===s.value&&o.status!=='cancelled'&&o.start_date&&o.end_date);
+    bookedDatesSet=new Set(bookedRanges.flatMap(o=>expandDateRange(o.start_date,o.end_date)));
+    setBookedRangesLabel();
+    applyCalendar();
+  };
+  s.addEventListener('change',async ()=>{selectedDates=[];setSelectedLabel();await refreshOrdersForTool();});
+  $('saveSchedule').onclick=()=>{
+    if(!selectedDates.length){alert('נא לבחור טווח תאריכים לפני שמירה');return;}
+    if(hasConflict(selectedDates)){alert('התאריכים שנבחרו כבר תפוסים.');return;}
+    saveBooking({toolId:s.value,selectedDates,pickupType:$('pickupType').value,cart:cart()});
+    alert('נשמר בהצלחה');
+  };
+  window.addEventListener('tools-updated',()=>{fillTools();refreshOrdersForTool();});
+  setInterval(async ()=>{const ok=await syncToolsFromServer(); if(ok){fillTools(); await refreshOrdersForTool();}},30000);
+  refreshOrdersForTool();
 }
 
 function renderPayment(){
@@ -154,39 +191,26 @@ function renderPayment(){
       customer_phone:$('customerPhone').value.trim()
     };
     $('confirmPayment').disabled=true;
-    await syncToolsFromServer();
-    const allTools=tools();
-    const tool=allTools.find(x=>x.id===b.toolId);
-    if(!tool){
-      $('confirmPayment').disabled=false;
-      $('paymentMsg').textContent='הכלי שנבחר לא נמצא כרגע. נא לחזור לבחירת כלי.';
-      $('paymentMsg').style.color='#dc3545';
-      return;
-    }
-    const reqDates=selectedSorted;
-    const conflicts=reqDates.filter(d=>(tool.busyDates||[]).includes(d));
-    if(conflicts.length){
+    const orders=await fetchOrdersFromServer();
+    const hasOverlap=orders.some(o=>o.tool_id===b.toolId&&o.status!=='cancelled'&&rangesOverlap(selectedSorted[0],selectedSorted[selectedSorted.length-1],o.start_date,o.end_date));
+    if(hasOverlap){
       $('confirmPayment').disabled=false;
       $('paymentMsg').textContent='חלק מהתאריכים כבר נתפסו על ידי הזמנה אחרת. נא לבחור תאריכים אחרים.';
       $('paymentMsg').style.color='#dc3545';
       return;
     }
-    tool.busyDates=uniqueDates([...(tool.busyDates||[]),...reqDates]);
-    const savedForAll=await saveToolsEverywhere(allTools);
-    if(!savedForAll){
-      $('confirmPayment').disabled=false;
-      $('paymentMsg').textContent='ההזמנה לא נשמרה לכולם כרגע (שרת לא זמין). נסה שוב בעוד כמה דקות.';
-      $('paymentMsg').style.color='#dc3545';
-      return;
-    }
-
     const sent=await sendOrderToAdmin(orderData);
     $('confirmPayment').disabled=false;
-    if(sent){
+    if(sent.ok){
       $('paymentMsg').textContent='ההזמנה אושרה ונשלחה למנהל בהצלחה.'; $('paymentMsg').style.color='#198754';
       return;
     }
-    $('paymentMsg').textContent='ההזמנה נשמרה לכל המשתמשים, אך לא ניתן היה לשלוח אוטומטית למנהל כרגע. נא לנסות שוב בעוד כמה דקות.';
+    if(sent.status===409){
+      $('paymentMsg').textContent='התאריכים שנתבחרו כבר נתפסו. נא לבחור תאריכים אחרים.';
+      $('paymentMsg').style.color='#dc3545';
+      return;
+    }
+    $('paymentMsg').textContent='לא ניתן היה לשלוח הזמנה כרגע. נא לנסות שוב בעוד כמה דקות.';
     $('paymentMsg').style.color='#fd7e14';
   };
 }
@@ -197,7 +221,38 @@ function renderAdmin(){
   show(localStorage.getItem(ADMIN_KEY)==='1');
   $('managerLoginBtn').onclick=()=>{if($('managerUser').value.trim()===ADMIN_USERNAME&&$('managerPass').value.trim()===ADMIN_PASSWORD){localStorage.setItem(ADMIN_KEY,'1');show(true);}else $('adminLoginMsg').textContent='פרטים שגויים';};
   $('adminLogoutBtn').onclick=()=>{localStorage.setItem(ADMIN_KEY,'0');show(false)};
-  document.querySelectorAll('.admin-tab-btn').forEach(b=>b.onclick=()=>{document.querySelectorAll('.admin-tab').forEach(t=>t.classList.add('hidden')); $('tab-'+b.dataset.tab).classList.remove('hidden');});
+  const renderOrdersTable=async ()=>{
+    const body=$('ordersTableBody');
+    if(!body) return;
+    body.innerHTML='<tr><td colspan="7">טוען הזמנות...</td></tr>';
+    const rows=await fetchOrdersFromServer();
+    const byId=new Map(tools().map(t=>[t.id,t.name]));
+    if(!rows.length){
+      body.innerHTML='<tr><td colspan="7">אין הזמנות להצגה</td></tr>';
+      return;
+    }
+    body.innerHTML='';
+    rows.forEach(o=>{
+      const tr=document.createElement('tr');
+      const status=o.status||'pending';
+      tr.innerHTML=`<td>${byId.get(o.tool_id)||o.tool_id||'-'}</td><td>${o.start_date||'-'}</td><td>${o.end_date||'-'}</td><td>${o.customer_name||'-'}</td><td>${o.customer_phone||'-'}</td><td>${status}</td><td><button class='secondary ord-approve' data-id='${o.id}'>אישור</button> <button class='danger ord-cancel' data-id='${o.id}'>ביטול</button></td>`;
+      body.appendChild(tr);
+    });
+    body.querySelectorAll('.ord-approve').forEach(b=>b.onclick=async ()=>{
+      b.disabled=true;
+      const ok=await updateOrderStatusOnServer(b.dataset.id,'approved');
+      $('adminActionMsg').textContent=ok?'הסטטוס עודכן ל-approved':'עדכון סטטוס נכשל';
+      await renderOrdersTable();
+    });
+    body.querySelectorAll('.ord-cancel').forEach(b=>b.onclick=async ()=>{
+      b.disabled=true;
+      const ok=await updateOrderStatusOnServer(b.dataset.id,'cancelled');
+      $('adminActionMsg').textContent=ok?'הסטטוס עודכן ל-cancelled':'עדכון סטטוס נכשל';
+      await renderOrdersTable();
+    });
+  };
+  document.querySelectorAll('.admin-tab-btn').forEach(b=>b.onclick=()=>{document.querySelectorAll('.admin-tab').forEach(t=>t.classList.add('hidden')); $('tab-'+b.dataset.tab).classList.remove('hidden'); if(b.dataset.tab==='orders') renderOrdersTable();});
+  if($('refreshOrdersBtn')) $('refreshOrdersBtn').onclick=renderOrdersTable;
   const fill=()=>{const h=tools().map(x=>`<option value='${x.id}'>${x.name}</option>`).join(''); ['editToolSelect','availToolSelect','maintToolSelect'].forEach(id=>$(id).innerHTML=h); loadEditForm();};
   const loadEditForm=()=>{
     const t=tools().find(v=>v.id===$('editToolSelect').value) || tools()[0];
@@ -232,6 +287,7 @@ function renderAdmin(){
   };
   $('saveBusyDatesBtn').onclick=async ()=>{const t=tools(),x=t.find(v=>v.id===$('availToolSelect').value); if(!x)return; x.busyDates=$('busyDates').value.split(',').map(s=>s.trim()).filter(Boolean); await saveToolsEverywhere(t); $('adminActionMsg').textContent='הזמינות נשמרה בהצלחה';};
   $('saveMaintBtn').onclick=async ()=>{const t=tools(),x=t.find(v=>v.id===$('maintToolSelect').value); if(!x)return; x.status=$('maintStatus').value; await saveToolsEverywhere(t); $('adminActionMsg').textContent='התחזוקה נשמרה בהצלחה'; renderAdminList();};
+  renderOrdersTable();
   fill(); renderAdminList();
 }
 function renderAdminList(){const l=$('adminToolsList'); if(!l)return; l.innerHTML=tools().map(t=>`<div><strong>${t.name}</strong><span>${t.status==='maintenance'?'בתחזוקה':'זמין'}</span></div>`).join('');}

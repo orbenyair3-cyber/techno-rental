@@ -172,6 +172,52 @@ app.post('/api/orders', async (req, res) => {
   res.status(201).json(created);
 });
 
+app.put('/api/orders/:id', async (req, res) => {
+  const id = req.params.id;
+  const { status } = req.body || {};
+
+  if (!id) {
+    res.status(400).json({ error: 'Order id is required' });
+    return;
+  }
+
+  const allowed = ['approved', 'cancelled'];
+  if (!allowed.includes(status)) {
+    res.status(400).json({ error: `status must be one of: ${allowed.join(', ')}` });
+    return;
+  }
+
+  const { data: existing, error: existingError } = await supabase
+    .from('orders')
+    .select('id')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (existingError) {
+    res.status(500).json({ error: 'Failed fetching order', details: existingError.message });
+    return;
+  }
+
+  if (!existing) {
+    res.status(404).json({ error: 'Order not found' });
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from('orders')
+    .update({ status })
+    .eq('id', id)
+    .select('*')
+    .single();
+
+  if (error) {
+    res.status(500).json({ error: 'Failed updating order status', details: error.message });
+    return;
+  }
+
+  res.json(data);
+});
+
 app.listen(PORT, () => {
   console.log(`Techno Rental API listening on port ${PORT}`);
 });
