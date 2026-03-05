@@ -260,7 +260,8 @@ app.post('/api/contact', async (req, res) => {
   const message = typeof body.message === 'string' ? body.message.trim() : '';
 
   if (!message) {
-    res.status(400).json({ error: 'message is required' });
+    console.error('[POST /api/contact] Validation error: message is required');
+    res.status(400).json({ ok: false, error: 'message is required' });
     return;
   }
 
@@ -274,14 +275,16 @@ app.post('/api/contact', async (req, res) => {
     });
 
   if (insertError) {
-    res.status(500).json({ error: 'Failed to save contact message', details: insertError.message });
+    console.error('[POST /api/contact] Supabase insert error:', insertError.message, insertError.details);
+    res.status(500).json({ ok: false, error: 'Failed to save contact message' });
     return;
   }
 
   try {
     await sendContactEmail({ name, email, phone, message });
   } catch (emailError) {
-    res.status(500).json({ error: 'Failed to send contact email', details: emailError.message });
+    console.error('[POST /api/contact] Email send error:', emailError?.message || emailError);
+    res.status(500).json({ ok: false, error: 'Failed to send contact email' });
     return;
   }
 
