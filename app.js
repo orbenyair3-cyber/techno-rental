@@ -1,5 +1,5 @@
 
-const STORAGE_KEY='technoTools',CART_KEY='technoCart',BOOKING_KEY='technoBooking',ADMIN_KEY='technoAdminLogged',ADMIN_USERNAME='Gal65',ADMIN_PASSWORD='Gal65$',API_BASE='/api';
+const STORAGE_KEY='technoTools',CART_KEY='technoCart',BOOKING_KEY='technoBooking',ADMIN_KEY='technoAdminLogged',ADMIN_USERNAME='Gal65',ADMIN_PASSWORD='Gal65$',API_BASE='https://YOUR-RENDER-URL';
 const defaults=['מקדחת יהלום','מקדחת אדמה','קונגו','מכונת פוליש','שואב אבק תעשייתי','גנרטור','מחרצת בטון','אקדח מסמרים עם מדחס','רמפה לגובה 1.8 מטר משקל 1 טון','פטישון נטען','מדחס אויר','מכונה לחידוש דקים','משאבת טבילה','משאבת מים'].map((n,i)=>({id:'t'+(i+1),name:n,desc:'תיאור כלי מקצועי',price:400,deposit:3000,maxDays:2,category:'כלי עבודה',image:`https://picsum.photos/seed/${encodeURIComponent(n)}/600/400`,busyDates:[],status:'available'}));
 const $=id=>document.getElementById(id), j=v=>JSON.stringify(v), p=v=>{try{return JSON.parse(v)}catch{return null}};
 const tools=()=>p(localStorage.getItem(STORAGE_KEY))||defaults, saveTools=t=>localStorage.setItem(STORAGE_KEY,j(t));
@@ -9,7 +9,7 @@ if(!localStorage.getItem(STORAGE_KEY)) saveTools(defaults);
 
 async function syncToolsFromServer(){
   try{
-    const r=await fetch(`${API_BASE}/tools`,{headers:{'Accept':'application/json'}});
+    const r=await fetch(`${API_BASE}/api/tools`,{headers:{'Accept':'application/json'}});
     if(!r.ok) return false;
     const serverTools=await r.json();
     if(Array.isArray(serverTools)&&serverTools.length){
@@ -24,13 +24,13 @@ async function saveToolsEverywhere(t){
   saveTools(t);
   window.dispatchEvent(new Event('tools-updated'));
   try{
-    const r=await fetch(`${API_BASE}/tools`,{method:'PUT',headers:{'Content-Type':'application/json'},body:j(t)});
+    const r=await fetch(`${API_BASE}/api/tools`,{method:'PUT',headers:{'Content-Type':'application/json'},body:j(t)});
     return r.ok;
   }catch{return false}
 }
 async function sendOrderToAdmin(payload){
   try{
-    const r=await fetch(`${API_BASE}/orders`,{method:'POST',headers:{'Content-Type':'application/json'},body:j(payload)});
+    const r=await fetch(`${API_BASE}/api/orders`,{method:'POST',headers:{'Content-Type':'application/json'},body:j(payload)});
     return r.ok;
   }catch{return false}
 }
@@ -145,14 +145,13 @@ function renderPayment(){
     const req=['invoiceName','customerPhone','customerEmail'];
     if(req.some(id=>!$(id).value.trim())){ $('paymentMsg').textContent='נא למלא שם לחשבונית, טלפון ואימייל'; $('paymentMsg').style.color='#dc3545'; return; }
     if(!b.toolId || !(b.selectedDates||[]).length){ $('paymentMsg').textContent='נא לבחור כלי ותאריכים לפני אישור ההזמנה'; $('paymentMsg').style.color='#dc3545'; return; }
+    const selectedSorted=uniqueDates(b.selectedDates||[]);
     const orderData={
-      invoiceName:$('invoiceName').value.trim(),
-      customerPhone:$('customerPhone').value.trim(),
-      customerEmail:$('customerEmail').value.trim(),
-      toolName,
-      selectedDates:(b.selectedDates||[]),
-      pickupType:b.pickupType||'בת שלמה',
-      subject:'הזמנה חדשה - אתר השכרה'
+      tool_id:b.toolId,
+      start_date:selectedSorted[0],
+      end_date:selectedSorted[selectedSorted.length-1],
+      customer_name:$('invoiceName').value.trim(),
+      customer_phone:$('customerPhone').value.trim()
     };
     $('confirmPayment').disabled=true;
     await syncToolsFromServer();
@@ -164,7 +163,7 @@ function renderPayment(){
       $('paymentMsg').style.color='#dc3545';
       return;
     }
-    const reqDates=uniqueDates(b.selectedDates||[]);
+    const reqDates=selectedSorted;
     const conflicts=reqDates.filter(d=>(tool.busyDates||[]).includes(d));
     if(conflicts.length){
       $('confirmPayment').disabled=false;
