@@ -25,8 +25,8 @@ async function saveToolsEverywhere(t){
   window.dispatchEvent(new Event('tools-updated'));
   try{
     const r=await fetch(`${API_BASE}/api/tools`,{method:'PUT',headers:{'Content-Type':'application/json'},body:j(t)});
-    return r.ok;
-  }catch{return false}
+    return {ok:r.ok,synced:r.ok};
+  }catch{return {ok:true,synced:false}}
 }
 async function fetchOrdersFromServer(){
   try{
@@ -333,6 +333,16 @@ function initContactForm(){
 
 function renderAdmin(){
   if(!$('adminLoginPanel'))return;
+  const setAdminMsg=(text,color)=>{
+    if(!$('adminActionMsg')) return;
+    $('adminActionMsg').textContent=text||'';
+    $('adminActionMsg').style.color=color||'';
+  };
+  const clearAddToolForm=()=>{
+    ['newToolName','newToolPrice','newToolDeposit','newToolMaxDays','newToolCategory','newToolImage','newToolMedia','newToolDesc'].forEach(id=>{if($(id)) $(id).value='';});
+    if($('newToolMediaFiles')) $('newToolMediaFiles').value='';
+    if($('newToolName')) $('newToolName').focus();
+  };
   const show=v=>{$('adminLoginPanel').style.display=v?'none':'block'; $('adminPanel').style.display=v?'block':'none'; $('adminToolsPanel').style.display=v?'block':'none'; if(v)renderAdminList();};
   show(localStorage.getItem(ADMIN_KEY)==='1');
   $('managerLoginBtn').onclick=()=>{if($('managerUser').value.trim()===ADMIN_USERNAME&&$('managerPass').value.trim()===ADMIN_PASSWORD){localStorage.setItem(ADMIN_KEY,'1');document.documentElement.classList.add('show-admin');show(true);}else $('adminLoginMsg').textContent='פרטים שגויים';};
@@ -394,7 +404,7 @@ function renderAdmin(){
     $('editToolDesc').value=t.desc||'';
   };
   $('editToolSelect').onchange=loadEditForm;
-  $('addToolBtn').onclick=async ()=>{const t=tools(),name=$('newToolName').value.trim(),desc=$('newToolDesc').value.trim(),price=+($('newToolPrice').value||0); if(!name||!desc||price<=0){$('adminActionMsg').textContent='נא למלא שם/מחיר/תיאור';return;} const textMedia=parseMediaInput(($('newToolMedia')?.value||'')); const uploadedMedia=await filesToDataUrls($('newToolMediaFiles')); const media=Array.from(new Set([...textMedia,...uploadedMedia])); const image=$('newToolImage').value||media[0]||`https://picsum.photos/seed/${encodeURIComponent(name)}/600/400`; t.unshift({id:'t'+Date.now(),name,desc,price,deposit:+$('newToolDeposit').value||3000,maxDays:+$('newToolMaxDays').value||2,category:$('newToolCategory').value||'כלי',image,media:media.length?media:[image],busyDates:[],status:'available'}); await saveToolsEverywhere(t); $('adminActionMsg').textContent='המוצר נוסף ונשמר בהצלחה לכולם'; if($('newToolMediaFiles')) $('newToolMediaFiles').value=''; fill(); renderAdminList();};
+  $('addToolBtn').onclick=async ()=>{const btn=$('addToolBtn'); const t=tools(),name=$('newToolName').value.trim(),desc=$('newToolDesc').value.trim(),price=+($('newToolPrice').value||0); if(!name||!desc||price<=0){setAdminMsg('נא למלא שם/מחיר/תיאור','#dc3545');return;} const textMedia=parseMediaInput(($('newToolMedia')?.value||'')); const uploadedMedia=await filesToDataUrls($('newToolMediaFiles')); const media=Array.from(new Set([...textMedia,...uploadedMedia])); const image=$('newToolImage').value||media[0]||`https://picsum.photos/seed/${encodeURIComponent(name)}/600/400`; t.unshift({id:'t'+Date.now(),name,desc,price,deposit:+$('newToolDeposit').value||3000,maxDays:+$('newToolMaxDays').value||2,category:$('newToolCategory').value||'כלי',image,media:media.length?media:[image],busyDates:[],status:'available'}); if(btn){btn.disabled=true;btn.textContent='מוסיף...';} const saveResult=await saveToolsEverywhere(t); if(btn){btn.disabled=false;btn.textContent='הוסף כלי';} fill(); renderAdminList(); clearAddToolForm(); if(saveResult.synced){setAdminMsg(`הכלי "${name}" נוסף ונשמר בהצלחה לכולם. אפשר להוסיף כלי נוסף.`,'#198754');} else {setAdminMsg(`הכלי "${name}" נוסף מקומית, אבל כרגע לא נשמר לשרת. בדקו חיבור אינטרנט ונסו שוב.`,'#fd7e14');}};
   $('saveEditToolBtn').onclick=async ()=>{
     const t=tools(),x=t.find(v=>v.id===$('editToolSelect').value); if(!x)return;
     const textMedia=parseMediaInput(($('editToolMedia')?.value||''));
@@ -410,13 +420,14 @@ function renderAdmin(){
     x.status=$('editToolStatus').value||x.status||'available';
     x.busyDates=$('editToolBusyDates').value.split(',').map(s=>s.trim()).filter(Boolean);
     x.desc=$('editToolDesc').value.trim()||x.desc;
-    await saveToolsEverywhere(t);
-    $('adminActionMsg').textContent='העריכה נשמרה בהצלחה ומעודכנת לכל המשתמשים';
+    const saveResult=await saveToolsEverywhere(t);
+    if(saveResult.synced) setAdminMsg('העריכה נשמרה בהצלחה ומעודכנת לכל המשתמשים','#198754');
+    else setAdminMsg('העריכה נשמרה מקומית בלבד (אין כרגע סנכרון לשרת).','#fd7e14');
     if($('editToolMediaFiles')) $('editToolMediaFiles').value='';
     fill(); renderAdminList();
   };
-  $('saveBusyDatesBtn').onclick=async ()=>{const t=tools(),x=t.find(v=>v.id===$('availToolSelect').value); if(!x)return; x.busyDates=$('busyDates').value.split(',').map(s=>s.trim()).filter(Boolean); await saveToolsEverywhere(t); $('adminActionMsg').textContent='הזמינות נשמרה בהצלחה';};
-  $('saveMaintBtn').onclick=async ()=>{const t=tools(),x=t.find(v=>v.id===$('maintToolSelect').value); if(!x)return; x.status=$('maintStatus').value; await saveToolsEverywhere(t); $('adminActionMsg').textContent='התחזוקה נשמרה בהצלחה'; renderAdminList();};
+  $('saveBusyDatesBtn').onclick=async ()=>{const t=tools(),x=t.find(v=>v.id===$('availToolSelect').value); if(!x)return; x.busyDates=$('busyDates').value.split(',').map(s=>s.trim()).filter(Boolean); const saveResult=await saveToolsEverywhere(t); if(saveResult.synced) setAdminMsg('הזמינות נשמרה בהצלחה','#198754'); else setAdminMsg('הזמינות נשמרה מקומית בלבד (אין כרגע סנכרון לשרת).','#fd7e14');};
+  $('saveMaintBtn').onclick=async ()=>{const t=tools(),x=t.find(v=>v.id===$('maintToolSelect').value); if(!x)return; x.status=$('maintStatus').value; const saveResult=await saveToolsEverywhere(t); if(saveResult.synced) setAdminMsg('התחזוקה נשמרה בהצלחה','#198754'); else setAdminMsg('התחזוקה נשמרה מקומית בלבד (אין כרגע סנכרון לשרת).','#fd7e14'); renderAdminList();};
   renderOrdersTable();
   fill(); renderAdminList();
 }
