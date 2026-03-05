@@ -267,6 +267,49 @@ function renderPayment(){
   };
 }
 
+function initContactForm(){
+  const form=$('contactForm');
+  if(!form) return;
+  const submitBtn=$('contactSubmitBtn');
+  const msg=$('contactFormMsg');
+  const setMsg=(text,color)=>{ if(msg){ msg.textContent=text; msg.style.color=color||''; } };
+
+  form.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const payload={
+      name:($('contactName')?.value||'').trim(),
+      email:($('contactEmail')?.value||'').trim(),
+      phone:($('contactPhone')?.value||'').trim(),
+      message:($('contactMessage')?.value||'').trim()
+    };
+
+    if(!payload.message){
+      setMsg('נא למלא הודעה לפני שליחה','#dc3545');
+      return;
+    }
+
+    if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Sending...'; }
+    setMsg('');
+
+    try{
+      const r=await fetch('https://techno-rental.onrender.com/api/contact',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:j(payload)
+      });
+      if(!r.ok) throw new Error('request_failed');
+      const data=await r.json().catch(()=>({}));
+      if(!data?.ok) throw new Error('invalid_response');
+      setMsg('ההודעה נשלחה! נחזור אליך בהקדם','#198754');
+      form.reset();
+    }catch{
+      setMsg('שגיאה בשליחת ההודעה. נסו שוב בעוד מספר דקות.','#dc3545');
+    }finally{
+      if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Submit'; }
+    }
+  });
+}
+
 function renderAdmin(){
   if(!$('adminLoginPanel'))return;
   const show=v=>{$('adminLoginPanel').style.display=v?'none':'block'; $('adminPanel').style.display=v?'block':'none'; $('adminToolsPanel').style.display=v?'block':'none'; if(v)renderAdminList();};
@@ -366,6 +409,7 @@ if(document.body.dataset.page==='catalog')renderCatalog();
 if(document.body.dataset.page==='schedule')renderSchedule();
 if(document.body.dataset.page==='payment')renderPayment();
 if(document.body.dataset.page==='admin')renderAdmin();
+initContactForm();
 initAdminLinkVisibility();
 syncToolsFromServer();
 initAccess();

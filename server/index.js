@@ -132,6 +132,32 @@ async function sendOrderEmails({ order, tool }) {
   });
 }
 
+async function sendContactEmail({ name, email, phone, message }) {
+  if (!resend) {
+    throw new Error('RESEND_API_KEY is not configured');
+  }
+  if (!MANAGER_EMAIL) {
+    throw new Error('MANAGER_EMAIL is not configured');
+  }
+
+  const html = `
+    <div dir="rtl" style="font-family:Arial,sans-serif;line-height:1.8">
+      <h2>הודעה חדשה מטופס יצירת קשר</h2>
+      <p><strong>שם:</strong> ${name || '-'}</p>
+      <p><strong>אימייל:</strong> ${email || '-'}</p>
+      <p><strong>טלפון:</strong> ${phone || '-'}</p>
+      <p><strong>הודעה:</strong><br>${String(message || '').replace(/\n/g, '<br>')}</p>
+    </div>
+  `;
+
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: MANAGER_EMAIL,
+    subject: 'New contact form message',
+    html
+  });
+}
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
@@ -224,6 +250,42 @@ app.post('/api/orders', async (req, res) => {
     console.error('[POST /api/orders] Unexpected error:', err?.message || err);
     res.status(500).json({ error: 'Unexpected server error', details: err?.message || 'Unknown error' });
   }
+});
+
+app.post('/api/contact', async (req, res) => {
+  const body = req.body || {};
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const email = typeof body.email === 'string' ? body.email.trim() : '';
+  const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
+  const message = typeof body.message === 'string' ? body.message.trim() : '';
+
+  if (!message) {
+    res.status(400).json({ error: 'message is required' });
+    return;
+  }
+
+  const { error: insertError } = await supabase
+    .from('contact_messages')
+    .insert({
+      name: name || null,
+      email: email || null,
+      phone: phone || null,
+      message
+    });
+
+  if (insertError) {
+    res.status(500).json({ error: 'Failed to save contact message', details: insertError.message });
+    return;
+  }
+
+  try {
+    await sendContactEmail({ name, email, phone, message });
+  } catch (emailError) {
+    res.status(500).json({ error: 'Failed to send contact email', details: emailError.message });
+    return;
+  }
+
+  res.json({ ok: true });
 });
 
 app.put('/api/orders/:id', async (req, res) => {
