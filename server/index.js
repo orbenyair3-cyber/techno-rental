@@ -119,10 +119,6 @@ function mapDbToolToClient(row) {
 
 function mapClientToolToDb(tool) {
   const mediaUrls = normalizeMediaUrls(tool);
-  const isAvailable = tool.is_available === undefined ? tool.status !== 'maintenance' : Boolean(tool.is_available);
-  const busyDates = Array.isArray(tool.busyDates)
-    ? tool.busyDates
-    : (Array.isArray(tool.busydates) ? tool.busydates : []);
   return {
     id: tool.id || undefined,
     name: tool.name || '',
@@ -132,9 +128,7 @@ function mapClientToolToDb(tool) {
     max_days: Number(tool.max_days ?? tool.maxDays ?? 0),
     image_url: tool.image_url || tool.image || mediaUrls[0] || null,
     description: tool.description || tool.desc || '',
-    media_urls: mediaUrls,
-    busydates: busyDates,
-    is_available: isAvailable
+    media_urls: mediaUrls
   };
 }
 

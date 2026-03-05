@@ -6,6 +6,7 @@ const SUPABASE_KEY='sb_publishable_wW6wy43I3Z7n2Tn24F6GXg_aAesbAjc';
 const TOOL_MEDIA_BUCKET='tool-media';
 const ALLOWED_MEDIA_TYPES=['image/jpeg','image/png','image/webp','video/mp4','video/webm'];
 const MAX_MEDIA_BYTES=20*1024*1024;
+const DEFAULT_TOOLS=['מקדחת יהלום','מקדחת אדמה','קונגו','מכונת פוליש','שואב אבק תעשייתי','גנרטור','מחרצת בטון','אקדח מסמרים עם מדחס','רמפה לגובה 1.8 מטר משקל 1 טון','פטישון נטען','מדחס אויר','מכונה לחידוש דקים','משאבת טבילה','משאבת מים'].map((n)=>({name:n,category:'כלי עבודה',price:400,deposit:3000,max_days:2,description:'תיאור כלי מקצועי',image_url:`https://picsum.photos/seed/${encodeURIComponent(n)}/600/400`,media_urls:[`https://picsum.photos/seed/${encodeURIComponent(n)}/600/400`]}));
 const $=id=>document.getElementById(id), j=v=>JSON.stringify(v), p=v=>{try{return JSON.parse(v)}catch{return null}};
 let TOOLS_CACHE=[];
 let supabaseClient=null;
@@ -81,6 +82,18 @@ async function syncToolsFromServer(){
     return true;
   }catch{
     setToolsSyncState({pending:true,lastFailedAt:Date.now()});
+    return false;
+  }
+}
+async function bootstrapDefaultToolsIfEmpty(){
+  try{
+    const rows=await fetchToolsFromServer();
+    if(Array.isArray(rows)&&rows.length) return false;
+    for(const tool of DEFAULT_TOOLS){
+      await createToolOnServer(tool);
+    }
+    return true;
+  }catch{
     return false;
   }
 }
@@ -247,6 +260,7 @@ const ymd=(d)=>{
 };
 const uniqueDates=arr=>Array.from(new Set((arr||[]).filter(Boolean))).sort();
 const parseMediaInput=(raw='')=>Array.from(new Set(String(raw).split(/[\n,]+/).map(s=>s.trim()).filter(Boolean)));
+const fileToDataUrl=(file)=>new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||''));r.onerror=()=>reject(new Error('read_failed'));r.readAsDataURL(file);});
 const normalizeToolMedia=(tool)=>{
   const list=Array.isArray(tool?.media_urls)&&tool.media_urls.length?tool.media_urls.filter(Boolean):(Array.isArray(tool?.media)&&tool.media.length?tool.media.filter(Boolean):[]);
   const fallback=tool?.image?[tool.image]:[];
@@ -268,6 +282,13 @@ const getSupabaseClient=async ()=>{
   return supabaseClient;
 };
 const safeFileName=(name='file')=>String(name||'file').replace(/[^\w.\-]+/g,'_');
+const uploadFilesViaApiFallback=async (files=[])=>{
+  const payload=await Promise.all(files.map(async f=>({name:f.name,type:f.type,dataUrl:await fileToDataUrl(f)})));
+  const r=await fetch(`${API_BASE}/api/media/upload`,{method:'POST',headers:{'Content-Type':'application/json'},body:j({files:payload})});
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data?.details||data?.error||'upload_failed');
+  return Array.isArray(data?.urls)?data.urls.filter(Boolean):[];
+};
 const uploadFilesToSupabase=async (inputId,msgId)=>{
   const input=$(inputId);
   const files=Array.from(input?.files||[]).filter(Boolean);
@@ -293,9 +314,15 @@ const uploadFilesToSupabase=async (inputId,msgId)=>{
     const urls=uploaded.filter(Boolean);
     setUploadMsg(msgId,`הועלו ${urls.length} קבצים בהצלחה`,'#198754');
     return urls;
-  }catch{
-    setUploadMsg(msgId,'שגיאת רשת בהעלאה','#dc3545');
-    return [];
+  }catch(err){
+    try{
+      const fallbackUrls=await uploadFilesViaApiFallback(files);
+      setUploadMsg(msgId,`הועלו ${fallbackUrls.length} קבצים בהצלחה`,'#198754');
+      return fallbackUrls;
+    }catch{
+      setUploadMsg(msgId,`שגיאת העלאה: ${err?.message||'network_error'}`,'#dc3545');
+      return [];
+    }
   }
 };
 function renderSchedule(){
@@ -665,6 +692,10 @@ async function initApp(){
   ensureAdminFooterLink();
   if(toolPages.has(page)){
     await syncToolsFromServer();
+    if(!tools().length){
+      const seeded=await bootstrapDefaultToolsIfEmpty();
+      if(seeded) await syncToolsFromServer();
+    }
     initToolsRealtime();
     setInterval(syncToolsFromServer,30000);
   }
