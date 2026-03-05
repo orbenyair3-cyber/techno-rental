@@ -77,10 +77,26 @@ function initTopActions(){
 
 function initAdminLinkVisibility(){
   try{
-    const params=new URLSearchParams(location.search);
-    if(params.get('admin')==='1') localStorage.setItem('tr_admin','1');
-    if(localStorage.getItem('tr_admin')==='1') document.documentElement.classList.add('show-admin');
+    document.documentElement.classList.toggle('show-admin',localStorage.getItem(ADMIN_KEY)==='1');
   }catch{}
+}
+
+function ensureAdminFooterLink(){
+  const footer=document.querySelector('.site-footer, footer');
+  if(!footer) return;
+  let links=footer.querySelector('.footer-links');
+  if(!links){
+    links=document.createElement('nav');
+    links.className='footer-links';
+    links.setAttribute('aria-label','Footer links');
+    footer.appendChild(links);
+  }
+  if(links.querySelector('a[href="admin.html"]')) return;
+  const a=document.createElement('a');
+  a.href='admin.html';
+  a.className='admin-link';
+  a.textContent='כניסת מנהל';
+  links.appendChild(a);
 }
 
 function renderCatalog(){
@@ -314,8 +330,8 @@ function renderAdmin(){
   if(!$('adminLoginPanel'))return;
   const show=v=>{$('adminLoginPanel').style.display=v?'none':'block'; $('adminPanel').style.display=v?'block':'none'; $('adminToolsPanel').style.display=v?'block':'none'; if(v)renderAdminList();};
   show(localStorage.getItem(ADMIN_KEY)==='1');
-  $('managerLoginBtn').onclick=()=>{if($('managerUser').value.trim()===ADMIN_USERNAME&&$('managerPass').value.trim()===ADMIN_PASSWORD){localStorage.setItem(ADMIN_KEY,'1');show(true);}else $('adminLoginMsg').textContent='פרטים שגויים';};
-  $('adminLogoutBtn').onclick=()=>{localStorage.setItem(ADMIN_KEY,'0');show(false)};
+  $('managerLoginBtn').onclick=()=>{if($('managerUser').value.trim()===ADMIN_USERNAME&&$('managerPass').value.trim()===ADMIN_PASSWORD){localStorage.setItem(ADMIN_KEY,'1');document.documentElement.classList.add('show-admin');show(true);}else $('adminLoginMsg').textContent='פרטים שגויים';};
+  $('adminLogoutBtn').onclick=()=>{localStorage.setItem(ADMIN_KEY,'0');document.documentElement.classList.remove('show-admin');show(false)};
   let activeOrderFilter='all';
   const computeTimeStatus=(o)=>{
     const today=ymd(new Date());
@@ -411,6 +427,7 @@ if(document.body.dataset.page==='payment')renderPayment();
 if(document.body.dataset.page==='admin')renderAdmin();
 initContactForm();
 initAdminLinkVisibility();
+ensureAdminFooterLink();
 syncToolsFromServer();
 initAccess();
 initTopActions();
