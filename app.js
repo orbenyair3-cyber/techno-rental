@@ -10,20 +10,23 @@ if(!localStorage.getItem(STORAGE_KEY)) saveTools(defaults);
 async function syncToolsFromServer(){
   try{
     const r=await fetch(`${API_BASE}/tools`,{headers:{'Accept':'application/json'}});
-    if(!r.ok) return;
+    if(!r.ok) return false;
     const serverTools=await r.json();
     if(Array.isArray(serverTools)&&serverTools.length){
       saveTools(serverTools);
       window.dispatchEvent(new Event('tools-updated'));
+      return true;
     }
-  }catch{}
+    return false;
+  }catch{return false}
 }
 async function saveToolsEverywhere(t){
   saveTools(t);
   window.dispatchEvent(new Event('tools-updated'));
   try{
-    await fetch(`${API_BASE}/tools`,{method:'PUT',headers:{'Content-Type':'application/json'},body:j(t)});
-  }catch{}
+    const r=await fetch(`${API_BASE}/tools`,{method:'PUT',headers:{'Content-Type':'application/json'},body:j(t)});
+    return r.ok;
+  }catch{return false}
 }
 async function sendOrderToAdmin(payload){
   try{
@@ -74,11 +77,12 @@ const ymd=(d)=>{
   const day=String(d.getDate()).padStart(2,'0');
   return `${y}-${m}-${day}`;
 };
+const uniqueDates=arr=>Array.from(new Set((arr||[]).filter(Boolean))).sort();
 function renderSchedule(){
   const s=$('selectedTool'),cg=$('calendarGrid'); if(!s||!cg)return;
   $('cartSummary').textContent='בחרו תאריך לכלי הנבחר';
-  const all=tools();
-  s.innerHTML=all.map(x=>`<option value='${x.id}'>${x.name}</option>`).join('');
+  const fillTools=()=>{const all=tools(); s.innerHTML=all.map(x=>`<option value='${x.id}'>${x.name}</option>`).join('');};
+  fillTools();
   const b=booking(); if(b.toolId)s.value=b.toolId; $('pickupType').value=b.pickupType||'בת שלמה';
   const buildRange=(start,end)=>{
     if(!start||!end) return [];
@@ -95,6 +99,9 @@ function renderSchedule(){
   let rangeEnd = selectedDates[selectedDates.length-1] || null;
 
   const paint=()=>{
+    const all=tools();
+    if(!all.length){ cg.innerHTML='<p class="small">אין כלים זמינים</p>'; return; }
+    if(!s.value || !all.find(x=>x.id===s.value)) s.value=all[0].id;
     const t=all.find(x=>x.id===s.value)||all[0];
     $('toolStatus').textContent = t.status==='maintenance' ? 'בתחזוקה' : 'פנוי';
     cg.innerHTML='';
@@ -123,6 +130,8 @@ function renderSchedule(){
   };
   s.addEventListener('change',paint);
   $('saveSchedule').onclick=()=>{saveBooking({toolId:s.value,selectedDates,pickupType:$('pickupType').value,cart:cart()}); alert('נשמר בהצלחה');};
+  window.addEventListener('tools-updated',()=>{fillTools();paint();});
+  setInterval(async ()=>{const ok=await syncToolsFromServer(); if(ok){fillTools(); paint();}},30000);
   paint();
 }
 
@@ -135,6 +144,7 @@ function renderPayment(){
   $('confirmPayment').onclick=async ()=>{
     const req=['invoiceName','customerPhone','customerEmail'];
     if(req.some(id=>!$(id).value.trim())){ $('paymentMsg').textContent='נא למלא שם לחשבונית, טלפון ואימייל'; $('paymentMsg').style.color='#dc3545'; return; }
+    if(!b.toolId || !(b.selectedDates||[]).length){ $('paymentMsg').textContent='נא לבחור כלי ותאריכים לפני אישור ההזמנה'; $('paymentMsg').style.color='#dc3545'; return; }
     const orderData={
       invoiceName:$('invoiceName').value.trim(),
       customerPhone:$('customerPhone').value.trim(),
@@ -145,14 +155,40 @@ function renderPayment(){
       subject:'הזמנה חדשה - אתר השכרה'
     };
     $('confirmPayment').disabled=true;
+    await syncToolsFromServer();
+    const allTools=tools();
+    const tool=allTools.find(x=>x.id===b.toolId);
+    if(!tool){
+      $('confirmPayment').disabled=false;
+      $('paymentMsg').textContent='הכלי שנבחר לא נמצא כרגע. נא לחזור לבחירת כלי.';
+      $('paymentMsg').style.color='#dc3545';
+      return;
+    }
+    const reqDates=uniqueDates(b.selectedDates||[]);
+    const conflicts=reqDates.filter(d=>(tool.busyDates||[]).includes(d));
+    if(conflicts.length){
+      $('confirmPayment').disabled=false;
+      $('paymentMsg').textContent='חלק מהתאריכים כבר נתפסו על ידי הזמנה אחרת. נא לבחור תאריכים אחרים.';
+      $('paymentMsg').style.color='#dc3545';
+      return;
+    }
+    tool.busyDates=uniqueDates([...(tool.busyDates||[]),...reqDates]);
+    const savedForAll=await saveToolsEverywhere(allTools);
+    if(!savedForAll){
+      $('confirmPayment').disabled=false;
+      $('paymentMsg').textContent='ההזמנה לא נשמרה לכולם כרגע (שרת לא זמין). נסה שוב בעוד כמה דקות.';
+      $('paymentMsg').style.color='#dc3545';
+      return;
+    }
+
     const sent=await sendOrderToAdmin(orderData);
     $('confirmPayment').disabled=false;
     if(sent){
       $('paymentMsg').textContent='ההזמנה אושרה ונשלחה למנהל בהצלחה.'; $('paymentMsg').style.color='#198754';
       return;
     }
-    $('paymentMsg').textContent='ההזמנה נשמרה אך לא ניתן היה לשלוח אוטומטית למנהל כרגע. נא לנסות שוב בעוד כמה דקות.';
-    $('paymentMsg').style.color='#dc3545';
+    $('paymentMsg').textContent='ההזמנה נשמרה לכל המשתמשים, אך לא ניתן היה לשלוח אוטומטית למנהל כרגע. נא לנסות שוב בעוד כמה דקות.';
+    $('paymentMsg').style.color='#fd7e14';
   };
 }
 
