@@ -679,7 +679,14 @@ function renderAdmin(){
   renderOrdersTable();
   fill(); renderAdminList();
 }
-function renderAdminList(){const l=$('adminToolsList'); if(!l)return; l.innerHTML=tools().map(t=>`<div><strong>${t.name}</strong><span>${t.status==='maintenance'?'בתחזוקה':'זמין'}</span></div>`).join('');}
+function renderAdminList(){
+  const l=$('adminToolsList');
+  if(!l)return;
+  l.innerHTML=tools().map(t=>{
+    const img=t.image||t.image_url||normalizeToolMedia(t)[0]||'';
+    return `<div style='display:flex;align-items:center;gap:10px;margin-bottom:8px'><img src='${img}' alt='${t.name}' style='width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb'><div><strong>${t.name}</strong><div class='small'>₪${Number(t.price||0)} ליום | פיקדון ₪${Number(t.deposit||0)}</div></div><span style='margin-inline-start:auto'>${t.status==='maintenance'?'בתחזוקה':'זמין'}</span></div>`;
+  }).join('');
+}
 
 function openStatement(){const txt='הצהרת נגישות: האתר פועל להנגשה מיטבית לכלל המשתמשים.'; const m=document.createElement('div'); m.className='modal'; m.innerHTML=`<div class='modal-content'><h3>הצהרת נגישות</h3><p>${txt}</p><button class='secondary'>סגירה</button></div>`; document.body.appendChild(m); m.querySelector('button').onclick=()=>m.remove();}
 function openReport(){const m=document.createElement('div'); m.className='modal'; m.innerHTML=`<div class='modal-content'><h3>דיווח הפרה</h3><div class='form-grid'><div><label>שם</label><input id='rn'></div><div><label>טלפון</label><input id='rp'></div><div><label>סיבת פניה</label><input id='rr'></div><div style='grid-column:1/-1'><label>תוכן</label><textarea id='rc'></textarea></div></div><div class='actions'><button id='sendr' class='primary'>שליחה</button><button id='cls' class='secondary'>סגירה</button></div></div>`; document.body.appendChild(m); m.querySelector('#cls').onclick=()=>m.remove(); m.querySelector('#sendr').onclick=()=>{const body=`שם: ${m.querySelector('#rn').value}\nטלפון: ${m.querySelector('#rp').value}\nסיבה: ${m.querySelector('#rr').value}\nתוכן: ${m.querySelector('#rc').value}`; location.href=`mailto:tec_ele1@017.net.il?subject=דיווח%20הפרת%20נגישות&body=${encodeURIComponent(body)}`;};}
