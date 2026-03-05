@@ -75,21 +75,49 @@ function initTopActions(){
   document.getElementById('resetHomeBtn').onclick=()=>{localStorage.removeItem(CART_KEY);localStorage.removeItem(BOOKING_KEY);location.href='index.html';};
 }
 
+function initAdminLinkVisibility(){
+  try{
+    const params=new URLSearchParams(location.search);
+    if(params.get('admin')==='1') localStorage.setItem('tr_admin','1');
+    if(localStorage.getItem('tr_admin')==='1') document.documentElement.classList.add('show-admin');
+  }catch{}
+}
+
 function renderCatalog(){
   const g=$('toolsGrid'); if(!g) return;
   const q=$('toolSearch');
   const draw=()=>{
     const filter=(q?.value||'').trim();
     g.innerHTML='';
-    tools().filter(t=>!filter||t.name.includes(filter)).forEach(x=>{
+    tools().filter(t=>!filter||t.name.includes(filter)).forEach((x,idx)=>{
       const d=document.createElement('article'); d.className='card';
       const isAvailable=x.status!=='maintenance';
-      d.innerHTML=`<img src='${x.image}' alt='${x.name}'><div class='card-content'><h3>${x.name}</h3><div class='tool-meta'><span class='price-day'>₪${x.price} ליום</span><span class='status-badge ${isAvailable?'status-available':'status-maintenance'}'>${isAvailable?'זמין':'בתחזוקה'}</span></div><p>${x.desc}</p><div class='actions'><button class='primary choose' data-id='${x.id}' ${isAvailable?'':'disabled'}>הזמן עכשיו</button></div></div>`;
+      const mediaItems=normalizeToolMedia(x);
+      const mediaHtml=mediaItems.map((url,i)=>{
+        const isVideo=/\.(mp4|webm|ogg)(\?|#|$)/i.test(url);
+        return `<div class='media-slide ${i===0?'active':''}' data-media-index='${i}'>${isVideo?`<video src='${url}' playsinline muted controls preload='metadata' aria-label='סרטון של ${x.name}'></video>`:`<img src='${url}' alt='${x.name} - מדיה ${i+1}'>`}</div>`;
+      }).join('');
+      const arrows=mediaItems.length>1?`<button class='media-arrow prev' type='button' data-dir='prev' aria-label='הקודם'>‹</button><button class='media-arrow next' type='button' data-dir='next' aria-label='הבא'>›</button>`:'';
+      d.innerHTML=`<div class='card-media' data-count='${mediaItems.length}' data-current='0' data-tool='${x.id}' data-card-index='${idx}'>${mediaHtml}${arrows}</div><div class='card-content'><h3>${x.name}</h3><div class='tool-meta'><span class='price-day'>₪${x.price} ליום</span><span class='status-badge ${isAvailable?'status-available':'status-maintenance'}'>${isAvailable?'זמין':'בתחזוקה'}</span></div><p>${x.desc}</p><div class='actions'><button class='primary choose' data-id='${x.id}' ${isAvailable?'':'disabled'}>הזמן עכשיו</button></div></div>`;
       g.appendChild(d);
     });
     g.querySelectorAll('.choose').forEach(b=>b.onclick=()=>{
       saveBooking({toolId:b.dataset.id, selectedDates:[], pickupType:'בת שלמה'});
       location.href='schedule.html';
+    });
+    g.querySelectorAll('.media-arrow').forEach(btn=>btn.onclick=()=>{
+      const wrap=btn.closest('.card-media');
+      if(!wrap) return;
+      const slides=Array.from(wrap.querySelectorAll('.media-slide'));
+      if(slides.length<2) return;
+      const current=Number(wrap.dataset.current||0);
+      const next=btn.dataset.dir==='next'?(current+1)%slides.length:(current-1+slides.length)%slides.length;
+      slides.forEach((s,i)=>{
+        s.classList.toggle('active',i===next);
+        const v=s.querySelector('video');
+        if(v&&i!==next) v.pause();
+      });
+      wrap.dataset.current=String(next);
     });
   };
   q?.addEventListener('input',draw);
@@ -110,6 +138,19 @@ const ymd=(d)=>{
   return `${y}-${m}-${day}`;
 };
 const uniqueDates=arr=>Array.from(new Set((arr||[]).filter(Boolean))).sort();
+const parseMediaInput=(raw='')=>Array.from(new Set(String(raw).split(/[\n,]+/).map(s=>s.trim()).filter(Boolean)));
+const fileToDataUrl=(file)=>new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||''));r.onerror=()=>reject(new Error('read_failed'));r.readAsDataURL(file);});
+const filesToDataUrls=async (input)=>{
+  const files=Array.from(input?.files||[]).filter(Boolean);
+  if(!files.length) return [];
+  const out=await Promise.all(files.map(fileToDataUrl).map(p=>p.catch(()=>'')));
+  return out.filter(Boolean);
+};
+const normalizeToolMedia=(tool)=>{
+  const list=Array.isArray(tool?.media)&&tool.media.length?tool.media.filter(Boolean):[];
+  const fallback=tool?.image?[tool.image]:[];
+  return list.length?list:fallback;
+};
 function renderSchedule(){
   const s=$('selectedTool'),picker=$('dateRangePicker'); if(!s||!picker)return;
   $('cartSummary').textContent='בחרו תאריך לכלי הנבחר';
@@ -232,42 +273,50 @@ function renderAdmin(){
   show(localStorage.getItem(ADMIN_KEY)==='1');
   $('managerLoginBtn').onclick=()=>{if($('managerUser').value.trim()===ADMIN_USERNAME&&$('managerPass').value.trim()===ADMIN_PASSWORD){localStorage.setItem(ADMIN_KEY,'1');show(true);}else $('adminLoginMsg').textContent='פרטים שגויים';};
   $('adminLogoutBtn').onclick=()=>{localStorage.setItem(ADMIN_KEY,'0');show(false)};
+  let activeOrderFilter='all';
+  const computeTimeStatus=(o)=>{
+    const today=ymd(new Date());
+    if(!o.start_date||!o.end_date) return 'upcoming';
+    if(o.end_date<today) return 'completed';
+    if(o.start_date>today) return 'upcoming';
+    return 'active';
+  };
+  const passesOrderFilter=(o,timeStatus)=>{
+    if(activeOrderFilter==='all') return true;
+    if(activeOrderFilter==='today'){ const t=ymd(new Date()); return o.start_date<=t&&o.end_date>=t; }
+    if(activeOrderFilter==='upcoming') return timeStatus==='upcoming';
+    if(activeOrderFilter==='completed') return timeStatus==='completed';
+    return true;
+  };
   const renderOrdersTable=async ()=>{
     const body=$('ordersTableBody');
     if(!body) return;
-    body.innerHTML='<tr><td colspan="7">טוען הזמנות...</td></tr>';
+    body.innerHTML='<tr><td colspan="7">Loading bookings...</td></tr>';
     const rows=await fetchOrdersFromServer();
-    const byId=new Map(tools().map(t=>[t.id,t.name]));
-    if(!rows.length){
-      body.innerHTML='<tr><td colspan="7">אין הזמנות להצגה</td></tr>';
+    const filtered=rows.filter(o=>passesOrderFilter(o,computeTimeStatus(o)));
+    const summary=$('ordersFilterSummary');
+    if(summary) summary.textContent=`מציג ${filtered.length} מתוך ${rows.length} הזמנות`;
+    if(!filtered.length){
+      body.innerHTML='<tr><td colspan="7">No bookings found</td></tr>';
       return;
     }
     body.innerHTML='';
-    rows.forEach(o=>{
+    filtered.forEach(o=>{
       const tr=document.createElement('tr');
       const status=o.status||'pending';
-      tr.innerHTML=`<td>${byId.get(o.tool_id)||o.tool_id||'-'}</td><td>${o.start_date||'-'}</td><td>${o.end_date||'-'}</td><td>${o.customer_name||'-'}</td><td>${o.customer_phone||'-'}</td><td>${status}</td><td><button class='secondary ord-approve' data-id='${o.id}'>אישור</button> <button class='danger ord-cancel' data-id='${o.id}'>ביטול</button></td>`;
+      const timeStatus=computeTimeStatus(o);
+      tr.innerHTML=`<td>${o.id||'-'}</td><td>${o.customer_name||'-'}</td><td>${o.customer_phone||'-'}</td><td>${o.tool_id||'-'}</td><td>${o.start_date||'-'}</td><td>${o.end_date||'-'}</td><td><span class='badge ${timeStatus}'>${timeStatus==='upcoming'?'Upcoming':timeStatus==='active'?'Active':'Completed'}</span> <span class='small'>(${status})</span></td>`;
       body.appendChild(tr);
-    });
-    body.querySelectorAll('.ord-approve').forEach(b=>b.onclick=async ()=>{
-      b.disabled=true;
-      const ok=await updateOrderStatusOnServer(b.dataset.id,'approved');
-      $('adminActionMsg').textContent=ok?'הסטטוס עודכן ל-approved':'עדכון סטטוס נכשל';
-      await renderOrdersTable();
-    });
-    body.querySelectorAll('.ord-cancel').forEach(b=>b.onclick=async ()=>{
-      b.disabled=true;
-      const ok=await updateOrderStatusOnServer(b.dataset.id,'cancelled');
-      $('adminActionMsg').textContent=ok?'הסטטוס עודכן ל-cancelled':'עדכון סטטוס נכשל';
-      await renderOrdersTable();
     });
   };
   document.querySelectorAll('.admin-tab-btn').forEach(b=>b.onclick=()=>{document.querySelectorAll('.admin-tab').forEach(t=>t.classList.add('hidden')); $('tab-'+b.dataset.tab).classList.remove('hidden'); if(b.dataset.tab==='orders') renderOrdersTable();});
+  document.querySelectorAll('[data-order-filter]').forEach(btn=>btn.onclick=()=>{activeOrderFilter=btn.dataset.orderFilter||'all'; document.querySelectorAll('[data-order-filter]').forEach(b=>b.setAttribute('aria-pressed',b===btn?'true':'false')); renderOrdersTable();});
   if($('refreshOrdersBtn')) $('refreshOrdersBtn').onclick=renderOrdersTable;
   const fill=()=>{const h=tools().map(x=>`<option value='${x.id}'>${x.name}</option>`).join(''); ['editToolSelect','availToolSelect','maintToolSelect'].forEach(id=>$(id).innerHTML=h); loadEditForm();};
   const loadEditForm=()=>{
     const t=tools().find(v=>v.id===$('editToolSelect').value) || tools()[0];
     if(!t) return;
+    const media=normalizeToolMedia(t);
     $('editToolSelect').value=t.id;
     $('editToolName').value=t.name||'';
     $('editToolPrice').value=t.price||0;
@@ -275,25 +324,31 @@ function renderAdmin(){
     $('editToolMaxDays').value=t.maxDays||0;
     $('editToolCategory').value=t.category||'';
     $('editToolImage').value=t.image||'';
+    $('editToolMedia').value=media.join('\n');
     $('editToolStatus').value=t.status||'available';
     $('editToolBusyDates').value=(t.busyDates||[]).join(', ');
     $('editToolDesc').value=t.desc||'';
   };
   $('editToolSelect').onchange=loadEditForm;
-  $('addToolBtn').onclick=async ()=>{const t=tools(),name=$('newToolName').value.trim(),desc=$('newToolDesc').value.trim(),price=+($('newToolPrice').value||0); if(!name||!desc||price<=0){$('adminActionMsg').textContent='נא למלא שם/מחיר/תיאור';return;} t.unshift({id:'t'+Date.now(),name,desc,price,deposit:+$('newToolDeposit').value||3000,maxDays:+$('newToolMaxDays').value||2,category:$('newToolCategory').value||'כלי',image:$('newToolImage').value||`https://picsum.photos/seed/${encodeURIComponent(name)}/600/400`,busyDates:[],status:'available'}); await saveToolsEverywhere(t); $('adminActionMsg').textContent='המוצר נוסף ונשמר בהצלחה לכולם'; fill(); renderAdminList();};
+  $('addToolBtn').onclick=async ()=>{const t=tools(),name=$('newToolName').value.trim(),desc=$('newToolDesc').value.trim(),price=+($('newToolPrice').value||0); if(!name||!desc||price<=0){$('adminActionMsg').textContent='נא למלא שם/מחיר/תיאור';return;} const textMedia=parseMediaInput(($('newToolMedia')?.value||'')); const uploadedMedia=await filesToDataUrls($('newToolMediaFiles')); const media=Array.from(new Set([...textMedia,...uploadedMedia])); const image=$('newToolImage').value||media[0]||`https://picsum.photos/seed/${encodeURIComponent(name)}/600/400`; t.unshift({id:'t'+Date.now(),name,desc,price,deposit:+$('newToolDeposit').value||3000,maxDays:+$('newToolMaxDays').value||2,category:$('newToolCategory').value||'כלי',image,media:media.length?media:[image],busyDates:[],status:'available'}); await saveToolsEverywhere(t); $('adminActionMsg').textContent='המוצר נוסף ונשמר בהצלחה לכולם'; if($('newToolMediaFiles')) $('newToolMediaFiles').value=''; fill(); renderAdminList();};
   $('saveEditToolBtn').onclick=async ()=>{
     const t=tools(),x=t.find(v=>v.id===$('editToolSelect').value); if(!x)return;
+    const textMedia=parseMediaInput(($('editToolMedia')?.value||''));
+    const uploadedMedia=await filesToDataUrls($('editToolMediaFiles'));
+    const media=Array.from(new Set([...textMedia,...uploadedMedia]));
     x.name=$('editToolName').value.trim()||x.name;
     x.price=+($('editToolPrice').value||x.price||0);
     x.deposit=+($('editToolDeposit').value||x.deposit||0);
     x.maxDays=+($('editToolMaxDays').value||x.maxDays||0);
     x.category=$('editToolCategory').value.trim()||x.category||'כלי';
-    x.image=$('editToolImage').value.trim()||x.image;
+    x.image=$('editToolImage').value.trim()||media[0]||x.image;
+    x.media=media.length?media:normalizeToolMedia(x);
     x.status=$('editToolStatus').value||x.status||'available';
     x.busyDates=$('editToolBusyDates').value.split(',').map(s=>s.trim()).filter(Boolean);
     x.desc=$('editToolDesc').value.trim()||x.desc;
     await saveToolsEverywhere(t);
     $('adminActionMsg').textContent='העריכה נשמרה בהצלחה ומעודכנת לכל המשתמשים';
+    if($('editToolMediaFiles')) $('editToolMediaFiles').value='';
     fill(); renderAdminList();
   };
   $('saveBusyDatesBtn').onclick=async ()=>{const t=tools(),x=t.find(v=>v.id===$('availToolSelect').value); if(!x)return; x.busyDates=$('busyDates').value.split(',').map(s=>s.trim()).filter(Boolean); await saveToolsEverywhere(t); $('adminActionMsg').textContent='הזמינות נשמרה בהצלחה';};
@@ -311,6 +366,7 @@ if(document.body.dataset.page==='catalog')renderCatalog();
 if(document.body.dataset.page==='schedule')renderSchedule();
 if(document.body.dataset.page==='payment')renderPayment();
 if(document.body.dataset.page==='admin')renderAdmin();
+initAdminLinkVisibility();
 syncToolsFromServer();
 initAccess();
 initTopActions();

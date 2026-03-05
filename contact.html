@@ -1,10 +1,58 @@
-<!doctype html><html lang='he' dir='rtl'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>יצירת קשר</title><link rel='stylesheet' href='styles.css'></head><body data-page=''><header class='hero'><div class='container'><h1>יצירת קשר</h1></div></header>
-<nav class='top-nav'>
-  <a href='index.html'>כלים להשכרה</a>
-  <a href='about.html'>אודות</a>
-  <a href='how-it-works.html'>איך זה עובד</a>
-  <a href='contact.html'>יצירת קשר</a>
-  <a href='terms.html'>תנאי שימוש</a>
-  <a href='privacy.html'>פרטיות</a>
-</nav>
-<main class='container'><section class='panel'><p>טלפון: 04-8210881/2 | מייל: tec_ele1@017.net.il</p></section></main><footer>© Techno Electric</footer><button id='accessBtn' class='access-btn'>♿</button><aside id='accessPanel' class='access-panel'></aside><script src='app.js'></script></body></html>
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Contact | Techno Rental</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-row">
+      <img src="assets/logo-main.png" alt="Techno Rental" class="logo-main">
+      <nav class="main-nav" aria-label="Main navigation">
+        <a href="index.html">Home</a>
+        <a href="tools.html">Tools</a>
+        <a href="contact.html">Contact</a>
+      </nav>
+      <span class="location-badge">Nesher, Israel</span>
+    </div>
+  </header>
+  <header class="hero"><div class="container"><h1>Contact</h1></div></header>
+  <main class="container">
+    <section class="panel readable">
+      <p><strong>Business name:</strong> Techno Rental</p>
+      <p><strong>Phone:</strong> 04-8210881/2</p>
+      <p><strong>Email:</strong> tec_ele1@017.net.il</p>
+      <p><strong>Address:</strong> Nesher, Israel</p>
+
+      <h2>Contact form</h2>
+      <p class="notice">This form is currently UI-only and is not yet connected to backend processing.</p>
+      <form action="#" method="post">
+        <label>Name<input name="name" type="text" required></label>
+        <label>Email<input name="email" type="email" required></label>
+        <label>Message<textarea name="message" rows="5" required></textarea></label>
+        <button type="submit" class="primary">Submit</button>
+      </form>
+    </section>
+  </main>
+
+  <footer class="site-footer" role="contentinfo">
+    <div class="container footer-inner">
+      <small>© 2026 Techno Rental</small>
+      <nav class="footer-links" aria-label="Footer links">
+        <a href="privacy.html">Privacy Policy</a>
+        <a href="terms.html">Terms of Use</a>
+        <a href="accessibility.html">Accessibility</a>
+        <a href="cookies.html">Cookies</a>
+        <a href="contact.html">Contact</a>
+        <a class="admin-link" href="admin.html">Admin</a>
+      </nav>
+    </div>
+  </footer>
+
+  <button id="accessBtn" class="access-btn">♿</button>
+  <aside id="accessPanel" class="access-panel"></aside>
+  <script src="app.js"></script>
+</body>
+</html>

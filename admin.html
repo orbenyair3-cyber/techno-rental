@@ -3,12 +3,35 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>אזור מנהל</title>
+  <title>Admin Panel – Bookings | Techno Rental</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body data-page="admin">
-  <header class="hero"><div class="container"><h1>אזור מנהל</h1><p>ניהול ציוד: הוספה, עריכה, זמינות, תחזוקה</p></div></header>
+  <header class="site-header">
+    <div class="container header-row">
+      <img src="assets/logo-main.png" alt="Techno Rental" class="logo-main">
+      <nav class="main-nav" aria-label="Main navigation">
+        <a href="index.html">Home</a>
+        <a href="tools.html">Tools</a>
+        <a href="contact.html">Contact</a>
+      </nav>
+      <span class="location-badge">Nesher, Israel</span>
+    </div>
+  </header>
+  <header class="hero"><div class="container"><h1>Admin Panel – Bookings</h1><p>Manage tools and view booking activity</p></div></header>
   <main class="container">
+    <section class="panel">
+      <h2>הוראות עבודה למנהל</h2>
+      <ol class="admin-guide-list">
+        <li><strong>הוספת כלי חדש:</strong> עברו ללשונית "הוספת כלי", מלאו שם/מחיר/תיאור (חובה), ואז הוסיפו קישורים למדיה בשדה "תמונות/סרטונים".</li>
+        <li><strong>העלאה מהמחשב/טלפון:</strong> אפשר לבחור קבצי תמונה/וידאו ישירות מהזיכרון דרך כפתור "העלאת קבצים". הקבצים יצטרפו למדיה של הכלי.</li>
+        <li><strong>כמה תמונות או סרטונים:</strong> בשדה המדיה הכניסו כל קישור בשורה נפרדת (או מופרד בפסיק). הסדר קובע: הפריט הראשון יוצג ראשון ללקוחות.</li>
+        <li><strong>עריכת כלי קיים:</strong> עברו ללשונית "עריכת כלי", בחרו כלי מהרשימה, שנו את השדות הרצויים ולחצו "שמור עריכה".</li>
+        <li><strong>שינוי סדר התמונות/סרטונים:</strong> בשדה המדיה בלשונית העריכה סדרו את הקישורים מחדש מלמעלה למטה לפי סדר ההצגה הרצוי.</li>
+        <li><strong>מה הלקוח רואה:</strong> בדף הכלים הלקוח יראה חיצים קטנים על המדיה ויוכל לעבור בין כל התמונות/הסרטונים שהוגדרו לכלי.</li>
+      </ol>
+    </section>
+
     <section id="adminLoginPanel" class="panel">
       <h2>כניסת מנהל</h2>
       <div class="form-grid">
@@ -37,6 +60,8 @@
           <div><label for="newToolMaxDays">מקס' ימים</label><input id="newToolMaxDays" type="number" /></div>
           <div><label for="newToolCategory">קטגוריה</label><input id="newToolCategory" /></div>
           <div><label for="newToolImage">תמונה</label><input id="newToolImage" /></div>
+          <div><label for="newToolMediaFiles">העלאת קבצים</label><input id="newToolMediaFiles" type="file" accept="image/*,video/*" multiple /></div>
+          <div style="grid-column:1/-1"><label for="newToolMedia">תמונות/סרטונים (קישור בכל שורה לפי הסדר)</label><textarea id="newToolMedia" placeholder="https://.../image1.jpg&#10;https://.../image2.jpg&#10;https://.../video.mp4"></textarea></div>
           <div style="grid-column:1/-1"><label for="newToolDesc">תיאור</label><textarea id="newToolDesc"></textarea></div>
         </div>
         <button id="addToolBtn" class="primary">הוסף כלי</button>
@@ -51,6 +76,8 @@
           <div><label for="editToolMaxDays">מקס' ימים</label><input id="editToolMaxDays" type="number" /></div>
           <div><label for="editToolCategory">קטגוריה</label><input id="editToolCategory" /></div>
           <div><label for="editToolImage">תמונה</label><input id="editToolImage" /></div>
+          <div><label for="editToolMediaFiles">העלאת קבצים</label><input id="editToolMediaFiles" type="file" accept="image/*,video/*" multiple /></div>
+          <div style="grid-column:1/-1"><label for="editToolMedia">תמונות/סרטונים (קישור בכל שורה לפי הסדר)</label><textarea id="editToolMedia" placeholder="https://.../image1.jpg&#10;https://.../image2.jpg&#10;https://.../video.mp4"></textarea></div>
           <div><label for="editToolStatus">סטטוס</label><select id="editToolStatus"><option value="available">זמין</option><option value="maintenance">בתחזוקה</option></select></div>
           <div><label for="editToolBusyDates">תאריכים תפוסים (פסיק)</label><input id="editToolBusyDates" /></div>
           <div style="grid-column:1/-1"><label for="editToolDesc">תיאור</label><textarea id="editToolDesc"></textarea></div>
@@ -75,20 +102,27 @@
       </div>
 
       <div id="tab-orders" class="admin-tab hidden">
-        <div class="actions">
+        <div class="admin-toolbar">
+          <div class="filter-buttons" role="group" aria-label="סינון הזמנות">
+            <button type="button" class="secondary" data-order-filter="all" aria-pressed="true">כל ההזמנות</button>
+            <button type="button" class="secondary" data-order-filter="today" aria-pressed="false">היום</button>
+            <button type="button" class="secondary" data-order-filter="upcoming" aria-pressed="false">עתידיות</button>
+            <button type="button" class="secondary" data-order-filter="completed" aria-pressed="false">הושלמו</button>
+          </div>
           <button id="refreshOrdersBtn" class="secondary">רענן הזמנות</button>
         </div>
-        <div style="overflow:auto">
+        <p id="ordersFilterSummary" class="status-line">מציג 0 הזמנות</p>
+        <div class="table-wrap">
           <table id="ordersTable" class="table">
             <thead>
               <tr>
-                <th>כלי</th>
-                <th>מתאריך</th>
-                <th>עד תאריך</th>
-                <th>שם לקוח</th>
-                <th>טלפון</th>
-                <th>סטטוס</th>
-                <th>פעולות</th>
+                <th>Order ID</th>
+                <th>Customer name</th>
+                <th>Phone</th>
+                <th>Tool ID</th>
+                <th>Start date</th>
+                <th>End date</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody id="ordersTableBody"></tbody>
@@ -105,7 +139,19 @@
     </section>
   </main>
 
-  <footer>© Techno Electric</footer>
+  <footer class="site-footer" role="contentinfo">
+    <div class="container footer-inner">
+      <small>© 2026 Techno Rental</small>
+      <nav class="footer-links" aria-label="קישורים בתחתית האתר">
+        <a href="privacy.html">Privacy Policy</a>
+        <a href="terms.html">Terms of Use</a>
+        <a href="accessibility.html">Accessibility</a>
+        <a href="cookies.html">Cookies</a>
+        <a href="contact.html">Contact</a>
+        <a class="admin-link" href="admin.html">Admin</a>
+      </nav>
+    </div>
+  </footer>
   <button id="accessBtn" class="access-btn">♿</button>
   <aside id="accessPanel" class="access-panel"></aside>
   <script src="app.js"></script>
