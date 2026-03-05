@@ -9,11 +9,43 @@ const getToolsSyncState=()=>p(localStorage.getItem(TOOLS_SYNC_STATE_KEY))||{pend
 const setToolsSyncState=(v)=>localStorage.setItem(TOOLS_SYNC_STATE_KEY,j(v||{pending:false}));
 if(!localStorage.getItem(STORAGE_KEY)) saveTools(defaults);
 
+const normalizeToolsForServer=(list=[])=>{
+  const src=Array.isArray(list)?list:[];
+  const existingNums=src.map(t=>Number(t?.id)).filter(n=>Number.isFinite(n));
+  let nextId=(existingNums.length?Math.max(...existingNums):0)+1;
+  return src.map((tool)=>{
+    const rawId=tool?.id;
+    let normalizedId;
+    if(typeof rawId==='number'&&Number.isFinite(rawId)) normalizedId=rawId;
+    else if(/^\d+$/.test(String(rawId||''))) normalizedId=Number(rawId);
+    else {
+      const extracted=String(rawId||'').match(/\d+/)?.[0];
+      normalizedId=extracted?Number(extracted):nextId++;
+    }
+    return {...tool,id:normalizedId};
+  });
+};
+
+async function putToolsToServer(list){
+  const r=await fetch(`${API_BASE}/api/tools`,{method:'PUT',headers:{'Content-Type':'application/json'},body:j(list)});
+  let body=null;
+  try{body=await r.json();}catch{}
+  return {ok:r.ok,status:r.status,body};
+}
+
 async function syncToolsFromServer(){
   const state=getToolsSyncState();
   if(state.pending){
     try{
-      const push=await fetch(`${API_BASE}/api/tools`,{method:'PUT',headers:{'Content-Type':'application/json'},body:j(tools())});
+      let push=await putToolsToServer(tools());
+      if(!push.ok){
+        const normalized=normalizeToolsForServer(tools());
+        push=await putToolsToServer(normalized);
+        if(push.ok){
+          saveTools(normalized);
+          window.dispatchEvent(new Event('tools-updated'));
+        }
+      }
       if(push.ok){
         setToolsSyncState({pending:false,lastSyncedAt:Date.now()});
         return true;
@@ -37,16 +69,24 @@ async function saveToolsEverywhere(t){
   saveTools(t);
   window.dispatchEvent(new Event('tools-updated'));
   try{
-    const r=await fetch(`${API_BASE}/api/tools`,{method:'PUT',headers:{'Content-Type':'application/json'},body:j(t)});
-    if(r.ok){
+    let result=await putToolsToServer(t);
+    if(!result.ok){
+      const normalized=normalizeToolsForServer(t);
+      result=await putToolsToServer(normalized);
+      if(result.ok){
+        saveTools(normalized);
+        window.dispatchEvent(new Event('tools-updated'));
+      }
+    }
+    if(result.ok){
       setToolsSyncState({pending:false,lastSyncedAt:Date.now()});
-      return {ok:true,synced:true};
+      return {ok:true,synced:true,message:''};
     }
     setToolsSyncState({pending:true,lastFailedAt:Date.now()});
-    return {ok:false,synced:false};
+    return {ok:false,synced:false,message:result?.body?.details||result?.body?.error||`http_${result?.status||0}`};
   }catch{
     setToolsSyncState({pending:true,lastFailedAt:Date.now()});
-    return {ok:true,synced:false}
+    return {ok:true,synced:false,message:'network_error'}
   }
 }
 async function fetchOrdersFromServer(){
@@ -192,6 +232,18 @@ const normalizeToolMedia=(tool)=>{
   const list=Array.isArray(tool?.media)&&tool.media.length?tool.media.filter(Boolean):[];
   const fallback=tool?.image?[tool.image]:[];
   return list.length?list:fallback;
+};
+const generateNewToolId=(allTools=[])=>{
+  const ids=(allTools||[]).map(t=>t?.id).filter(v=>v!==undefined&&v!==null);
+  const hasNumericIds=ids.some(v=>typeof v==='number' || /^\d+$/.test(String(v)));
+  if(hasNumericIds){
+    const maxNumeric=ids.reduce((max,v)=>{
+      const n=Number(v);
+      return Number.isFinite(n)?Math.max(max,n):max;
+    },0);
+    return maxNumeric+1;
+  }
+  return 't'+Date.now();
 };
 function renderSchedule(){
   const s=$('selectedTool'),picker=$('dateRangePicker'); if(!s||!picker)return;
@@ -425,7 +477,7 @@ function renderAdmin(){
     $('editToolDesc').value=t.desc||'';
   };
   $('editToolSelect').onchange=loadEditForm;
-  $('addToolBtn').onclick=async ()=>{const btn=$('addToolBtn'); const t=tools(),name=$('newToolName').value.trim(),desc=$('newToolDesc').value.trim(),price=+($('newToolPrice').value||0); if(!name||!desc||price<=0){setAdminMsg('נא למלא שם/מחיר/תיאור','#dc3545');return;} const textMedia=parseMediaInput(($('newToolMedia')?.value||'')); const uploadedMedia=await filesToDataUrls($('newToolMediaFiles')); const media=Array.from(new Set([...textMedia,...uploadedMedia])); const image=$('newToolImage').value||media[0]||`https://picsum.photos/seed/${encodeURIComponent(name)}/600/400`; t.unshift({id:'t'+Date.now(),name,desc,price,deposit:+$('newToolDeposit').value||3000,maxDays:+$('newToolMaxDays').value||2,category:$('newToolCategory').value||'כלי',image,media:media.length?media:[image],busyDates:[],status:'available'}); if(btn){btn.disabled=true;btn.textContent='מוסיף...';} const saveResult=await saveToolsEverywhere(t); if(btn){btn.disabled=false;btn.textContent='הוסף כלי';} fill(); renderAdminList(); clearAddToolForm(); if(saveResult.synced){setAdminMsg(`הכלי "${name}" נוסף ונשמר בהצלחה לכולם. אפשר להוסיף כלי נוסף.`,'#198754');} else {setAdminMsg(`הכלי "${name}" נוסף מקומית, אבל כרגע לא נשמר לשרת. בדקו חיבור אינטרנט ונסו שוב.`,'#fd7e14');}};
+  $('addToolBtn').onclick=async ()=>{const btn=$('addToolBtn'); const t=tools(),name=$('newToolName').value.trim(),desc=$('newToolDesc').value.trim(),price=+($('newToolPrice').value||0); if(!name||!desc||price<=0){setAdminMsg('נא למלא שם/מחיר/תיאור','#dc3545');return;} const textMedia=parseMediaInput(($('newToolMedia')?.value||'')); const uploadedMedia=await filesToDataUrls($('newToolMediaFiles')); const media=Array.from(new Set([...textMedia,...uploadedMedia])); const image=$('newToolImage').value||media[0]||`https://picsum.photos/seed/${encodeURIComponent(name)}/600/400`; t.unshift({id:generateNewToolId(t),name,desc,price,deposit:+$('newToolDeposit').value||3000,maxDays:+$('newToolMaxDays').value||2,category:$('newToolCategory').value||'כלי',image,media:media.length?media:[image],busyDates:[],status:'available'}); if(btn){btn.disabled=true;btn.textContent='מוסיף...';} const saveResult=await saveToolsEverywhere(t); if(btn){btn.disabled=false;btn.textContent='הוסף כלי';} fill(); renderAdminList(); clearAddToolForm(); if(saveResult.synced){setAdminMsg(`הכלי "${name}" נוסף ונשמר בהצלחה לכולם. אפשר להוסיף כלי נוסף.`,'#198754');} else {const details=saveResult.message&&saveResult.message!=='network_error'?` פרטי שגיאה: ${saveResult.message}`:''; setAdminMsg(`הכלי "${name}" נוסף מקומית, אבל כרגע לא נשמר לשרת.${saveResult.message==='network_error'?' בדקו חיבור אינטרנט.':''}${details}`,'#fd7e14');}};
   $('saveEditToolBtn').onclick=async ()=>{
     const t=tools(),x=t.find(v=>v.id===$('editToolSelect').value); if(!x)return;
     const textMedia=parseMediaInput(($('editToolMedia')?.value||''));
