@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
+import { Resend } from 'resend';
 
 dotenv.config();
 
@@ -10,6 +11,9 @@ const PORT = process.env.PORT || 10000;
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const MANAGER_EMAIL = process.env.MANAGER_EMAIL || 'tec_ele1@017.net.il';
+const FROM_EMAIL = process.env.FROM_EMAIL || 'Techno Electric <onboarding@resend.dev>';
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables.');
@@ -17,6 +21,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
 const allowedOrigins = ['https://orbenyair3-cyber.github.io'];
 
@@ -41,6 +46,90 @@ function isValidDateString(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function isValidEmail(value) {
+  if (typeof value !== 'string') return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function getDaysInclusive(startDate, endDate) {
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  const diffMs = end.getTime() - start.getTime();
+  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+  return Math.max(days, 1);
+}
+
+function formatDateTimeHe(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return 'לא זמין';
+  return new Intl.DateTimeFormat('he-IL', {
+    dateStyle: 'full',
+    timeStyle: 'short',
+    timeZone: 'Asia/Jerusalem'
+  }).format(date);
+}
+
+async function sendOrderEmails({ order, tool }) {
+  if (!resend) {
+    console.warn('Skipping email send: RESEND_API_KEY is not configured');
+    return;
+  }
+
+  const siteUrl = 'https://orbenyair3-cyber.github.io/techno-rental/';
+  const toolName = tool?.name || order.tool_id;
+  const pricePerDay = Number(tool?.price || 0);
+  const days = getDaysInclusive(order.start_date, order.end_date);
+  const estimatedTotal = pricePerDay > 0 ? pricePerDay * days : null;
+  const createdAtLabel = formatDateTimeHe(order.created_at || new Date().toISOString());
+
+  const commonHtml = `
+    <div dir="rtl" style="font-family:Arial,sans-serif;line-height:1.8">
+      <p><strong>מזהה הזמנה:</strong> ${order.id}</p>
+      <p><strong>שם הכלי:</strong> ${toolName}</p>
+      <p><strong>תאריך התחלה:</strong> ${order.start_date}</p>
+      <p><strong>תאריך סיום:</strong> ${order.end_date}</p>
+      <p><strong>תאריך ושעת ביצוע הזמנה:</strong> ${createdAtLabel}</p>
+      <p><strong>מחיר ליום:</strong> ${pricePerDay > 0 ? `${pricePerDay} ₪` : 'לא זמין'}</p>
+      <p><strong>סה"כ משוער:</strong> ${estimatedTotal !== null ? `${estimatedTotal} ₪ (${days} ימים)` : 'לא זמין'}</p>
+      <p><strong>פרטי לקוח:</strong> ${order.customer_name} | ${order.customer_phone} | ${order.customer_email}</p>
+      <p><a href="${siteUrl}">מעבר לאתר</a></p>
+    </div>
+  `;
+
+  const jobs = [];
+
+  if (order.customer_email) {
+    jobs.push(
+      resend.emails.send({
+        from: FROM_EMAIL,
+        to: order.customer_email,
+        subject: 'אישור הזמנה – Techno Electric',
+        html: `<div dir="rtl" style="font-family:Arial,sans-serif"><h2>ההזמנה שלך התקבלה בהצלחה</h2>${commonHtml}</div>`
+      })
+    );
+  }
+
+  if (MANAGER_EMAIL) {
+    jobs.push(
+      resend.emails.send({
+        from: FROM_EMAIL,
+        to: MANAGER_EMAIL,
+        subject: 'הזמנה חדשה באתר – Techno Electric',
+        html: `<div dir="rtl" style="font-family:Arial,sans-serif"><h2>התקבלה הזמנה חדשה באתר</h2>${commonHtml}</div>`
+      })
+    );
+  } else {
+    console.warn('Skipping manager email: MANAGER_EMAIL is not configured');
+  }
+
+  const results = await Promise.allSettled(jobs);
+  results.forEach((r) => {
+    if (r.status === 'rejected') {
+      console.error('Email sending failed:', r.reason);
+    }
+  });
 }
 
 app.get('/health', (req, res) => {
@@ -92,84 +181,49 @@ app.put('/api/tools', async (req, res) => {
 });
 
 app.post('/api/orders', async (req, res) => {
-  const { tool_id, start_date, end_date, customer_name, customer_phone } = req.body || {};
+  console.log('[POST /api/orders] request body:', req.body);
+  const body = req.body || {};
 
-  if (!tool_id) {
-    res.status(400).json({ error: 'tool_id is required' });
-    return;
-  }
-  if (!isValidDateString(start_date) || !isValidDateString(end_date)) {
-    res.status(400).json({ error: 'start_date and end_date must be valid YYYY-MM-DD dates' });
-    return;
-  }
-  if (start_date > end_date) {
-    res.status(400).json({ error: 'start_date cannot be after end_date' });
-    return;
-  }
-  if (!customer_name || !String(customer_name).trim()) {
-    res.status(400).json({ error: 'customer_name is required' });
-    return;
-  }
-  if (!customer_phone || !String(customer_phone).trim()) {
-    res.status(400).json({ error: 'customer_phone is required' });
+  if (!body.tool_id || !body.start_date || !body.end_date || !body.customer_name || !body.customer_phone) {
+    res.status(400).json({ error: 'Missing required fields: tool_id, start_date, end_date, customer_name, customer_phone' });
     return;
   }
 
-  const { data: toolRow, error: toolError } = await supabase
-    .from('tools')
-    .select('id')
-    .eq('id', tool_id)
-    .maybeSingle();
+  try {
+    const insertPayload = {
+      tool_id: body.tool_id,
+      start_date: body.start_date,
+      end_date: body.end_date,
+      customer_name: body.customer_name,
+      customer_phone: body.customer_phone
+    };
 
-  if (toolError) {
-    res.status(500).json({ error: 'Failed validating tool', details: toolError.message });
-    return;
-  }
-  if (!toolRow) {
-    res.status(404).json({ error: 'Tool not found' });
-    return;
-  }
+    const { data: created, error: createError } = await supabase
+      .from('orders')
+      .insert(insertPayload)
+      .select('*')
+      .single();
 
-  const { data: overlaps, error: overlapError } = await supabase
-    .from('orders')
-    .select('id,start_date,end_date')
-    .eq('tool_id', tool_id)
-    .lte('start_date', end_date)
-    .gte('end_date', start_date);
+    if (createError) {
+      console.error('[POST /api/orders] Supabase insert error:', createError.message, createError.details);
+      res.status(500).json({
+        error: 'Failed creating order',
+        message: createError.message,
+        details: createError.details
+      });
+      return;
+    }
 
-  if (overlapError) {
-    res.status(500).json({ error: 'Failed checking overlap', details: overlapError.message });
-    return;
-  }
+    res.status(200).json(created);
 
-  if (overlaps && overlaps.length > 0) {
-    res.status(409).json({
-      error: 'Tool already booked for the selected date range',
-      conflicts: overlaps
+    // fire-and-forget emails
+    sendOrderEmails({ order: created, tool: null }).catch((err) => {
+      console.error('Failed sending order emails:', err);
     });
-    return;
+  } catch (err) {
+    console.error('[POST /api/orders] Unexpected error:', err?.message || err);
+    res.status(500).json({ error: 'Unexpected server error', details: err?.message || 'Unknown error' });
   }
-
-  const payload = {
-    tool_id,
-    start_date,
-    end_date,
-    customer_name: String(customer_name).trim(),
-    customer_phone: String(customer_phone).trim()
-  };
-
-  const { data: created, error: createError } = await supabase
-    .from('orders')
-    .insert(payload)
-    .select('*')
-    .single();
-
-  if (createError) {
-    res.status(500).json({ error: 'Failed creating order', details: createError.message });
-    return;
-  }
-
-  res.status(201).json(created);
 });
 
 app.put('/api/orders/:id', async (req, res) => {
