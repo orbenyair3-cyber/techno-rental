@@ -91,11 +91,16 @@ function ensureAdminFooterLink(){
     links.setAttribute('aria-label','Footer links');
     footer.appendChild(links);
   }
-  if(links.querySelector('a[href="admin.html"]')) return;
+  const existing=links.querySelector('a[href="admin.html"]');
+  if(existing){
+    existing.classList.add('admin-link');
+    existing.textContent='התחברות מנהל';
+    return;
+  }
   const a=document.createElement('a');
   a.href='admin.html';
   a.className='admin-link';
-  a.textContent='כניסת מנהל';
+  a.textContent='התחברות מנהל';
   links.appendChild(a);
 }
 
