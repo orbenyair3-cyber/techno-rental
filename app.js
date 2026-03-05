@@ -1,13 +1,20 @@
 
 const STORAGE_KEY='technoTools',CART_KEY='technoCart',BOOKING_KEY='technoBooking',ADMIN_KEY='technoAdminLogged',TOOLS_SYNC_STATE_KEY='technoToolsSyncState',ADMIN_USERNAME='Gal65',ADMIN_PASSWORD='Gal65$',API_BASE='https://techno-rental.onrender.com';
-const defaults=['מקדחת יהלום','מקדחת אדמה','קונגו','מכונת פוליש','שואב אבק תעשייתי','גנרטור','מחרצת בטון','אקדח מסמרים עם מדחס','רמפה לגובה 1.8 מטר משקל 1 טון','פטישון נטען','מדחס אויר','מכונה לחידוש דקים','משאבת טבילה','משאבת מים'].map((n,i)=>({id:'t'+(i+1),name:n,desc:'תיאור כלי מקצועי',price:400,deposit:3000,maxDays:2,category:'כלי עבודה',image:`https://picsum.photos/seed/${encodeURIComponent(n)}/600/400`,busyDates:[],status:'available'}));
+const SUPABASE_URL_RAW='https://aqzxhiaaivahmgyhchdd.supabase.co 2222222';
+const SUPABASE_URL=String(SUPABASE_URL_RAW||'').trim().split(/\s+/)[0];
+const SUPABASE_KEY='sb_publishable_wW6wy43I3Z7n2Tn24F6GXg_aAesbAjc';
+const TOOL_MEDIA_BUCKET='tool-media';
+const ALLOWED_MEDIA_TYPES=['image/jpeg','image/png','image/webp','video/mp4','video/webm'];
+const MAX_MEDIA_BYTES=20*1024*1024;
 const $=id=>document.getElementById(id), j=v=>JSON.stringify(v), p=v=>{try{return JSON.parse(v)}catch{return null}};
-const tools=()=>p(localStorage.getItem(STORAGE_KEY))||[], saveTools=t=>localStorage.setItem(STORAGE_KEY,j(Array.isArray(t)?t:[]));
+let TOOLS_CACHE=[];
+let supabaseClient=null;
+const tools=()=>Array.isArray(TOOLS_CACHE)?TOOLS_CACHE:[], saveTools=t=>{TOOLS_CACHE=Array.isArray(t)?t:[]; try{localStorage.setItem(STORAGE_KEY,j(TOOLS_CACHE));}catch{}};
 const cart=()=>p(localStorage.getItem(CART_KEY))||[], saveCart=c=>localStorage.setItem(CART_KEY,j(c));
 const booking=()=>p(localStorage.getItem(BOOKING_KEY))||{}, saveBooking=b=>localStorage.setItem(BOOKING_KEY,j(b));
 const getToolsSyncState=()=>p(localStorage.getItem(TOOLS_SYNC_STATE_KEY))||{pending:false};
 const setToolsSyncState=(v)=>localStorage.setItem(TOOLS_SYNC_STATE_KEY,j(v||{pending:false}));
-if(!localStorage.getItem(STORAGE_KEY)) saveTools([]);
+saveTools([]);
 
 const toolPages=new Set(['catalog','schedule','payment','admin']);
 
@@ -38,24 +45,15 @@ const toClientTool=(tool={})=>{
 const toServerToolPayload=(tool={})=>{
   const normalized=toClientTool(tool);
   return {
-    id:normalized.id,
     name:normalized.name,
     category:normalized.category,
     price:normalized.price,
     deposit:normalized.deposit,
     max_days:Number(normalized.maxDays||0),
-    is_available:Boolean(normalized.is_available),
-    maintenance:normalized.status==='maintenance',
-    alerts:normalized.alerts||[],
     image_url:normalized.image_url||normalized.image||'',
     description:normalized.description||normalized.desc||'',
-    media_urls:Array.isArray(normalized.media_urls)?normalized.media_urls:[],
-    busyDates:Array.isArray(normalized.busyDates)?normalized.busyDates:[]
+    media_urls:Array.isArray(normalized.media_urls)?normalized.media_urls.filter(Boolean):[]
   };
-};
-
-const createToolId=()=>{
-  try{return crypto.randomUUID();}catch{return `tool-${Date.now()}-${Math.random().toString(16).slice(2)}`;}
 };
 
 async function apiJson(url,options={}){
@@ -78,6 +76,7 @@ async function syncToolsFromServer(){
   try{
     const serverTools=await fetchToolsFromServer();
     saveTools(serverTools);
+    setToolsSyncState({pending:false,lastSyncedAt:Date.now()});
     window.dispatchEvent(new Event('tools-updated'));
     return true;
   }catch{
@@ -86,11 +85,11 @@ async function syncToolsFromServer(){
   }
 }
 async function createToolOnServer(tool){
-  const payload=toServerToolPayload({...(tool||{}),id:tool?.id||createToolId()});
+  const payload=toServerToolPayload(tool||{});
   await apiJson(`${API_BASE}/api/tools`,{method:'POST',headers:{'Content-Type':'application/json'},body:j(payload)});
 }
 async function updateToolOnServer(id,tool){
-  const payload=toServerToolPayload({...(tool||{}),id});
+  const payload=toServerToolPayload(tool||{});
   await apiJson(`${API_BASE}/api/tools/${encodeURIComponent(id)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:j(payload)});
 }
 async function fetchOrdersFromServer(){
@@ -248,13 +247,6 @@ const ymd=(d)=>{
 };
 const uniqueDates=arr=>Array.from(new Set((arr||[]).filter(Boolean))).sort();
 const parseMediaInput=(raw='')=>Array.from(new Set(String(raw).split(/[\n,]+/).map(s=>s.trim()).filter(Boolean)));
-const fileToDataUrl=(file)=>new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||''));r.onerror=()=>reject(new Error('read_failed'));r.readAsDataURL(file);});
-const filesToDataUrls=async (input)=>{
-  const files=Array.from(input?.files||[]).filter(Boolean);
-  if(!files.length) return [];
-  const out=await Promise.all(files.map(fileToDataUrl).map(p=>p.catch(()=>'')));
-  return out.filter(Boolean);
-};
 const normalizeToolMedia=(tool)=>{
   const list=Array.isArray(tool?.media_urls)&&tool.media_urls.length?tool.media_urls.filter(Boolean):(Array.isArray(tool?.media)&&tool.media.length?tool.media.filter(Boolean):[]);
   const fallback=tool?.image?[tool.image]:[];
@@ -268,23 +260,37 @@ const renderMediaPreview=(containerId,urls=[])=>{
   el.innerHTML=clean.map((url,i)=>`<div class='media-preview-item'>${isVideoUrl(url)?`<video src='${url}' controls preload='metadata' muted playsinline></video>`:`<img src='${url}' alt='media ${i+1}'>`}<small>${i+1}</small></div>`).join('');
 };
 const setUploadMsg=(id,text,color)=>{if(!$(id))return; $(id).textContent=text||''; $(id).style.color=color||'';};
-const uploadFilesToServer=async (inputId,msgId)=>{
+const getSupabaseClient=async ()=>{
+  if(supabaseClient) return supabaseClient;
+  if(!SUPABASE_URL||!SUPABASE_KEY) throw new Error('supabase_config_missing');
+  const mod=await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
+  supabaseClient=mod.createClient(SUPABASE_URL,SUPABASE_KEY);
+  return supabaseClient;
+};
+const safeFileName=(name='file')=>String(name||'file').replace(/[^\w.\-]+/g,'_');
+const uploadFilesToSupabase=async (inputId,msgId)=>{
   const input=$(inputId);
   const files=Array.from(input?.files||[]).filter(Boolean);
   if(!files.length) return [];
-  const allowed=['image/jpeg','image/png','image/webp','video/mp4','video/webm'];
-  const maxBytes=20*1024*1024;
-  const invalid=files.find(f=>!allowed.includes(String(f.type||'').toLowerCase()));
+  const invalid=files.find(f=>!ALLOWED_MEDIA_TYPES.includes(String(f.type||'').toLowerCase()));
   if(invalid){setUploadMsg(msgId,'סוג קובץ לא נתמך. מותר: jpg/png/webp/mp4/webm','#dc3545'); return [];}
-  const tooLarge=files.find(f=>(f?.size||0)>maxBytes);
+  const tooLarge=files.find(f=>(f?.size||0)>MAX_MEDIA_BYTES);
   if(tooLarge){setUploadMsg(msgId,'קובץ גדול מדי. מקסימום 20MB לקובץ.','#dc3545'); return [];}
   setUploadMsg(msgId,'מעלה קבצים...','#0d6efd');
   try{
-    const payload=await Promise.all(files.map(async f=>({name:f.name,type:f.type,dataUrl:await fileToDataUrl(f)})));
-    const r=await fetch(`${API_BASE}/api/media/upload`,{method:'POST',headers:{'Content-Type':'application/json'},body:j({files:payload})});
-    const data=await r.json().catch(()=>({}));
-    if(!r.ok){setUploadMsg(msgId,`העלאה נכשלה: ${data?.details||data?.error||'שגיאה לא ידועה'}`,'#dc3545');return [];}
-    const urls=Array.isArray(data?.urls)?data.urls.filter(Boolean):[];
+    const sb=await getSupabaseClient();
+    const uploaded=[];
+    for(let i=0;i<files.length;i++){
+      const f=files[i];
+      const uniqueName=`${Date.now()}-${f.name}`;
+      const fileName=safeFileName(uniqueName);
+      const path=`tools/${fileName}`;
+      const {error:uploadError}=await sb.storage.from(TOOL_MEDIA_BUCKET).upload(path,f,{upsert:false,contentType:f.type||undefined});
+      if(uploadError) throw uploadError;
+      const {data:pub}=sb.storage.from(TOOL_MEDIA_BUCKET).getPublicUrl(path);
+      if(pub?.publicUrl) uploaded.push(pub.publicUrl);
+    }
+    const urls=uploaded.filter(Boolean);
     setUploadMsg(msgId,`הועלו ${urls.length} קבצים בהצלחה`,'#198754');
     return urls;
   }catch{
@@ -292,7 +298,6 @@ const uploadFilesToServer=async (inputId,msgId)=>{
     return [];
   }
 };
-const generateNewToolId=()=>createToolId();
 function renderSchedule(){
   const s=$('selectedTool'),picker=$('dateRangePicker'); if(!s||!picker)return;
   $('cartSummary').textContent='בחרו תאריך לכלי הנבחר';
@@ -537,7 +542,7 @@ function renderAdmin(){
   if($('newToolMedia')) $('newToolMedia').addEventListener('input',()=>renderMediaPreview('newToolMediaPreview',parseMediaInput($('newToolMedia').value||'')));
   if($('editToolMedia')) $('editToolMedia').addEventListener('input',()=>renderMediaPreview('editToolMediaPreview',parseMediaInput($('editToolMedia').value||'')));
   if($('newToolMediaFiles')) $('newToolMediaFiles').addEventListener('change',async ()=>{
-    const urls=await uploadFilesToServer('newToolMediaFiles','newToolMediaUploadMsg');
+    const urls=await uploadFilesToSupabase('newToolMediaFiles','newToolMediaUploadMsg');
     if($('newToolMediaFiles')) $('newToolMediaFiles').value='';
     if(urls.length){
       const merged=mergeMediaIntoField('newToolMedia',urls);
@@ -546,7 +551,7 @@ function renderAdmin(){
     }
   });
   if($('editToolMediaFiles')) $('editToolMediaFiles').addEventListener('change',async ()=>{
-    const urls=await uploadFilesToServer('editToolMediaFiles','editToolMediaUploadMsg');
+    const urls=await uploadFilesToSupabase('editToolMediaFiles','editToolMediaUploadMsg');
     if($('editToolMediaFiles')) $('editToolMediaFiles').value='';
     if(urls.length){
       const merged=mergeMediaIntoField('editToolMedia',urls);
@@ -565,21 +570,16 @@ function renderAdmin(){
     const price=+($('newToolPrice').value||0);
     if(!name||!desc||price<=0){setAdminMsg('נא למלא שם/מחיר/תיאור','#dc3545');return;}
     const media=parseMediaInput(($('newToolMedia')?.value||''));
-    const image=$('newToolImage').value||media[0]||`https://picsum.photos/seed/${encodeURIComponent(name)}/600/400`;
+    const image=media[0]||$('newToolImage').value||`https://picsum.photos/seed/${encodeURIComponent(name)}/600/400`;
     const newTool={
-      id:generateNewToolId(),
       name,
       category:$('newToolCategory').value||'כלי',
       price,
       deposit:+$('newToolDeposit').value||3000,
       maxDays:+$('newToolMaxDays').value||2,
-      is_available:true,
-      maintenance:false,
-      alerts:[],
       image_url:image,
       description:desc,
       media_urls:media.length?media:[image],
-      busyDates:[]
     };
     if(btn){btn.disabled=true;btn.textContent='מוסיף...';}
     try{
@@ -605,7 +605,7 @@ function renderAdmin(){
       deposit:+($('editToolDeposit').value||x.deposit||0),
       maxDays:+($('editToolMaxDays').value||x.maxDays||0),
       category:$('editToolCategory').value.trim()||x.category||'כלי',
-      image_url:$('editToolImage').value.trim()||normalizedMedia[0]||x.image,
+      image_url:normalizedMedia[0]||$('editToolImage').value.trim()||x.image,
       description:$('editToolDesc').value.trim()||x.desc,
       media_urls:normalizedMedia,
       busyDates:$('editToolBusyDates').value.split(',').map(s=>s.trim()).filter(Boolean),
