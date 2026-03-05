@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
+import { randomUUID } from 'crypto';
 
 dotenv.config();
 
@@ -14,6 +15,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const MANAGER_EMAIL = process.env.MANAGER_EMAIL || 'tec_ele1@017.net.il';
 const FROM_EMAIL = process.env.FROM_EMAIL || 'Techno Electric <onboarding@resend.dev>';
+const TOOL_MEDIA_BUCKET = process.env.TOOL_MEDIA_BUCKET || 'tool-media';
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables.');
@@ -22,24 +24,117 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
+let toolMediaBucketReady = false;
 
-const allowedOrigins = ['https://orbenyair3-cyber.github.io'];
+const ALLOWED_MEDIA_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/webm']);
+const MAX_MEDIA_FILE_BYTES = 20 * 1024 * 1024;
+
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://orbenyair3-cyber.github.io',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500'
+];
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS.join(','))
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || origin === 'null' || allowedOrigins.includes(origin)) {
         callback(null, true);
         return;
       }
-      callback(new Error('CORS blocked for this origin'));
+      callback(new Error(`CORS blocked for origin: ${origin}`));
     },
-    methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type']
   })
 );
 
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
+function dataUrlToBuffer(dataUrl) {
+  if (typeof dataUrl !== 'string') return null;
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return null;
+  const mime = match[1];
+  const payload = match[2];
+  try {
+    const buffer = Buffer.from(payload, 'base64');
+    return { mime, buffer };
+  } catch {
+    return null;
+  }
+}
+
+async function ensureToolMediaBucket() {
+  if (toolMediaBucketReady) return true;
+  const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+  if (listError) throw new Error(`Storage list buckets failed: ${listError.message}`);
+  const exists = (buckets || []).some((b) => b.name === TOOL_MEDIA_BUCKET);
+  if (!exists) {
+    const { error: createError } = await supabase.storage.createBucket(TOOL_MEDIA_BUCKET, {
+      public: true,
+      fileSizeLimit: 50 * 1024 * 1024
+    });
+    if (createError) throw new Error(`Storage create bucket failed: ${createError.message}`);
+  }
+  toolMediaBucketReady = true;
+  return true;
+}
+
+function normalizeMediaUrls(tool) {
+  const fromMediaUrls = Array.isArray(tool?.media_urls) ? tool.media_urls : [];
+  const fromMedia = Array.isArray(tool?.media) ? tool.media : [];
+  const fallback = tool?.image ? [tool.image] : [];
+  return Array.from(new Set([...fromMediaUrls, ...fromMedia, ...fallback].map((v) => String(v || '').trim()).filter(Boolean)));
+}
+
+function mapDbToolToClient(row) {
+  if (!row) return row;
+  return {
+    id: row.id,
+    name: row.name || '',
+    category: row.category || '',
+    price: Number(row.price || 0),
+    deposit: Number(row.deposit || 0),
+    maxDays: Number(row.max_days || 0),
+    image: row.image_url || row.image || '',
+    desc: row.description || row.desc || '',
+    media_urls: Array.isArray(row.media_urls) ? row.media_urls : [],
+    busyDates: Array.isArray(row.busydates) ? row.busydates : (Array.isArray(row.busyDates) ? row.busyDates : []),
+    status: row.is_available === false ? 'maintenance' : 'available'
+  };
+}
+
+function mapClientToolToDb(tool) {
+  const mediaUrls = normalizeMediaUrls(tool);
+  const isAvailable = tool.is_available === undefined ? tool.status !== 'maintenance' : Boolean(tool.is_available);
+  const busyDates = Array.isArray(tool.busyDates)
+    ? tool.busyDates
+    : (Array.isArray(tool.busydates) ? tool.busydates : []);
+  return {
+    id: tool.id || undefined,
+    name: tool.name || '',
+    category: tool.category || '',
+    price: Number(tool.price || 0),
+    deposit: Number(tool.deposit || 0),
+    max_days: Number(tool.max_days ?? tool.maxDays ?? 0),
+    image_url: tool.image_url || tool.image || mediaUrls[0] || null,
+    description: tool.description || tool.desc || '',
+    media_urls: mediaUrls,
+    busydates: busyDates,
+    is_available: isAvailable
+  };
+}
 
 function isValidDateString(value) {
   if (typeof value !== 'string') return false;
@@ -168,7 +263,7 @@ app.get('/api/tools', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch tools', details: error.message });
     return;
   }
-  res.json(data);
+  res.json((data || []).map(mapDbToolToClient));
 });
 
 app.get('/api/orders', async (req, res) => {
@@ -180,18 +275,88 @@ app.get('/api/orders', async (req, res) => {
   res.json(data);
 });
 
-app.put('/api/tools', async (req, res) => {
-  const tools = req.body;
+app.get('/api/tools/stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
 
-  if (!Array.isArray(tools)) {
+  const channelName = `tools-stream-${randomUUID()}`;
+  const channel = supabase
+    .channel(channelName)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tools' }, (payload) => {
+      res.write(`data: ${JSON.stringify({ type: 'tools_changed', event: payload.eventType })}\n\n`);
+    });
+
+  await channel.subscribe();
+  const ping = setInterval(() => {
+    res.write(`event: ping\ndata: ${Date.now()}\n\n`);
+  }, 25000);
+
+  req.on('close', async () => {
+    clearInterval(ping);
+    try { await supabase.removeChannel(channel); } catch {}
+    res.end();
+  });
+});
+
+app.post('/api/tools', async (req, res) => {
+  const payload = mapClientToolToDb(req.body || {});
+  const insertPayload = payload.id ? payload : { ...payload, id: undefined };
+  const { data, error } = await supabase.from('tools').insert(insertPayload).select('*').single();
+  if (error) {
+    console.error('[POST /api/tools] error:', error.message, error.details);
+    res.status(500).json({ error: 'Failed to create tool', details: error.message });
+    return;
+  }
+  res.status(201).json(mapDbToolToClient(data));
+});
+
+app.put('/api/tools/:id', async (req, res) => {
+  const id = req.params.id;
+  if (!id) {
+    res.status(400).json({ error: 'id is required' });
+    return;
+  }
+  const payload = mapClientToolToDb({ ...(req.body || {}), id });
+  const { data, error } = await supabase.from('tools').update(payload).eq('id', id).select('*').single();
+  if (error) {
+    console.error('[PUT /api/tools/:id] error:', error.message, error.details);
+    res.status(500).json({ error: 'Failed to update tool', details: error.message });
+    return;
+  }
+  res.json(mapDbToolToClient(data));
+});
+
+app.delete('/api/tools/:id', async (req, res) => {
+  const id = req.params.id;
+  if (!id) {
+    res.status(400).json({ error: 'id is required' });
+    return;
+  }
+  const { error } = await supabase.from('tools').delete().eq('id', id);
+  if (error) {
+    console.error('[DELETE /api/tools/:id] error:', error.message, error.details);
+    res.status(500).json({ error: 'Failed to delete tool', details: error.message });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.put('/api/tools', async (req, res) => {
+  const incomingTools = req.body;
+
+  if (!Array.isArray(incomingTools)) {
     res.status(400).json({ error: 'Body must be an array of tools' });
     return;
   }
 
-  if (tools.some((tool) => !tool || !tool.id)) {
+  if (incomingTools.some((tool) => !tool || !tool.id)) {
     res.status(400).json({ error: 'Each tool must include id' });
     return;
   }
+
+  const tools = incomingTools.map(mapClientToolToDb);
 
   const { data, error } = await supabase
     .from('tools')
@@ -203,7 +368,50 @@ app.put('/api/tools', async (req, res) => {
     return;
   }
 
-  res.json(data);
+  res.json((data || []).map(mapDbToolToClient));
+});
+
+app.post('/api/media/upload', async (req, res) => {
+  try {
+    await ensureToolMediaBucket();
+    const files = Array.isArray(req.body?.files) ? req.body.files : [];
+    if (!files.length) {
+      res.status(400).json({ error: 'files array is required' });
+      return;
+    }
+
+    const uploaded = [];
+    for (const file of files) {
+      const parsed = dataUrlToBuffer(file?.dataUrl || '');
+      const mime = String(file?.type || parsed?.mime || '').toLowerCase();
+      if (!parsed || !ALLOWED_MEDIA_MIME.has(mime)) {
+        res.status(400).json({ error: `Unsupported file type: ${mime || 'unknown'}` });
+        return;
+      }
+      if (parsed.buffer.length > MAX_MEDIA_FILE_BYTES) {
+        res.status(400).json({ error: 'File too large (max 20MB)' });
+        return;
+      }
+      const ext = mime.split('/')[1] || 'bin';
+      const safeName = String(file?.name || 'media').replace(/[^a-zA-Z0-9._-]/g, '_');
+      const path = `tools/${new Date().toISOString().slice(0, 10)}/${randomUUID()}_${safeName}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from(TOOL_MEDIA_BUCKET)
+        .upload(path, parsed.buffer, { contentType: mime, upsert: false });
+      if (uploadError) {
+        console.error('[POST /api/media/upload] upload error:', uploadError.message);
+        res.status(500).json({ error: 'Failed uploading file', details: uploadError.message });
+        return;
+      }
+      const { data: pub } = supabase.storage.from(TOOL_MEDIA_BUCKET).getPublicUrl(path);
+      uploaded.push(pub?.publicUrl);
+    }
+
+    res.json({ urls: uploaded.filter(Boolean) });
+  } catch (err) {
+    console.error('[POST /api/media/upload] error:', err?.message || err);
+    res.status(500).json({ error: 'Media upload failed', details: err?.message || 'Unknown error' });
+  }
 });
 
 app.post('/api/orders', async (req, res) => {
