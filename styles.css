@@ -236,6 +236,31 @@ button,.btn{
 
 .admin-tab.hidden,.hidden{display:none}
 
+.media-preview-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
+  gap:10px;
+}
+.media-preview-item{
+  border:1px solid #e5e7eb;
+  border-radius:10px;
+  padding:6px;
+  background:#fff;
+}
+.media-preview-item img,.media-preview-item video{
+  width:100%;
+  height:90px;
+  object-fit:cover;
+  border-radius:8px;
+  display:block;
+}
+.media-preview-item small{
+  display:block;
+  text-align:center;
+  margin-top:4px;
+  color:#6b7280;
+}
+
 .access-btn{position:fixed;left:12px;bottom:18px;width:44px;height:44px;border-radius:999px;background:#111827;color:#fff;z-index:9999}
 .access-panel{position:fixed;left:10px;bottom:68px;width:280px;max-height:70vh;overflow:auto;background:#fff;border:1px solid #ccd6e5;border-radius:10px;padding:8px;display:none;z-index:9999}
 .access-panel.open{display:block}.access-panel button{width:100%;margin:3px 0}

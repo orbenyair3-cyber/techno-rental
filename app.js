@@ -2,100 +2,126 @@
 const STORAGE_KEY='technoTools',CART_KEY='technoCart',BOOKING_KEY='technoBooking',ADMIN_KEY='technoAdminLogged',TOOLS_SYNC_STATE_KEY='technoToolsSyncState',ADMIN_USERNAME='Gal65',ADMIN_PASSWORD='Gal65$',API_BASE='https://techno-rental.onrender.com';
 const defaults=['מקדחת יהלום','מקדחת אדמה','קונגו','מכונת פוליש','שואב אבק תעשייתי','גנרטור','מחרצת בטון','אקדח מסמרים עם מדחס','רמפה לגובה 1.8 מטר משקל 1 טון','פטישון נטען','מדחס אויר','מכונה לחידוש דקים','משאבת טבילה','משאבת מים'].map((n,i)=>({id:'t'+(i+1),name:n,desc:'תיאור כלי מקצועי',price:400,deposit:3000,maxDays:2,category:'כלי עבודה',image:`https://picsum.photos/seed/${encodeURIComponent(n)}/600/400`,busyDates:[],status:'available'}));
 const $=id=>document.getElementById(id), j=v=>JSON.stringify(v), p=v=>{try{return JSON.parse(v)}catch{return null}};
-const tools=()=>p(localStorage.getItem(STORAGE_KEY))||defaults, saveTools=t=>localStorage.setItem(STORAGE_KEY,j(t));
+const tools=()=>p(localStorage.getItem(STORAGE_KEY))||[], saveTools=t=>localStorage.setItem(STORAGE_KEY,j(Array.isArray(t)?t:[]));
 const cart=()=>p(localStorage.getItem(CART_KEY))||[], saveCart=c=>localStorage.setItem(CART_KEY,j(c));
 const booking=()=>p(localStorage.getItem(BOOKING_KEY))||{}, saveBooking=b=>localStorage.setItem(BOOKING_KEY,j(b));
 const getToolsSyncState=()=>p(localStorage.getItem(TOOLS_SYNC_STATE_KEY))||{pending:false};
 const setToolsSyncState=(v)=>localStorage.setItem(TOOLS_SYNC_STATE_KEY,j(v||{pending:false}));
-if(!localStorage.getItem(STORAGE_KEY)) saveTools(defaults);
+if(!localStorage.getItem(STORAGE_KEY)) saveTools([]);
 
-const normalizeToolsForServer=(list=[])=>{
-  const src=Array.isArray(list)?list:[];
-  const existingNums=src.map(t=>Number(t?.id)).filter(n=>Number.isFinite(n));
-  let nextId=(existingNums.length?Math.max(...existingNums):0)+1;
-  return src.map((tool)=>{
-    const rawId=tool?.id;
-    let normalizedId;
-    if(typeof rawId==='number'&&Number.isFinite(rawId)) normalizedId=rawId;
-    else if(/^\d+$/.test(String(rawId||''))) normalizedId=Number(rawId);
-    else {
-      const extracted=String(rawId||'').match(/\d+/)?.[0];
-      normalizedId=extracted?Number(extracted):nextId++;
-    }
-    return {...tool,id:normalizedId};
-  });
+const toolPages=new Set(['catalog','schedule','payment','admin']);
+
+const toClientTool=(tool={})=>{
+  const media=Array.isArray(tool?.media_urls)?tool.media_urls.filter(Boolean):[];
+  const image=tool.image_url||tool.image||media[0]||'';
+  const busyDates=Array.isArray(tool?.busyDates)?tool.busyDates:(Array.isArray(tool?.busydates)?tool.busydates:[]);
+  const isAvailable=tool?.is_available===undefined ? tool?.status!=='maintenance' : Boolean(tool?.is_available);
+  return {
+    ...(tool||{}),
+    id:tool?.id,
+    name:tool?.name||'',
+    category:tool?.category||'כלי',
+    price:Number(tool?.price||0),
+    deposit:Number(tool?.deposit||0),
+    maxDays:Number(tool?.maxDays??tool?.max_days??0),
+    image,
+    image_url:image,
+    desc:tool?.desc||tool?.description||'',
+    description:tool?.description||tool?.desc||'',
+    media_urls:media.length?media:(image?[image]:[]),
+    busyDates,
+    is_available:isAvailable,
+    status:isAvailable?'available':'maintenance'
+  };
 };
 
-async function putToolsToServer(list){
-  const r=await fetch(`${API_BASE}/api/tools`,{method:'PUT',headers:{'Content-Type':'application/json'},body:j(list)});
+const toServerToolPayload=(tool={})=>{
+  const normalized=toClientTool(tool);
+  return {
+    id:normalized.id,
+    name:normalized.name,
+    category:normalized.category,
+    price:normalized.price,
+    deposit:normalized.deposit,
+    max_days:Number(normalized.maxDays||0),
+    is_available:Boolean(normalized.is_available),
+    maintenance:normalized.status==='maintenance',
+    alerts:normalized.alerts||[],
+    image_url:normalized.image_url||normalized.image||'',
+    description:normalized.description||normalized.desc||'',
+    media_urls:Array.isArray(normalized.media_urls)?normalized.media_urls:[],
+    busyDates:Array.isArray(normalized.busyDates)?normalized.busyDates:[]
+  };
+};
+
+const createToolId=()=>{
+  try{return crypto.randomUUID();}catch{return `tool-${Date.now()}-${Math.random().toString(16).slice(2)}`;}
+};
+
+async function apiJson(url,options={}){
+  const r=await fetch(url,{cache:'no-store',headers:{'Accept':'application/json','Cache-Control':'no-cache',...(options.headers||{})},...options});
   let body=null;
   try{body=await r.json();}catch{}
-  return {ok:r.ok,status:r.status,body};
+  if(!r.ok){
+    const err={status:r.status,body:body||{error:`http_${r.status}`}};
+    throw err;
+  }
+  return body;
+}
+
+async function fetchToolsFromServer(){
+  const rows=await apiJson(`${API_BASE}/api/tools?_=${Date.now()}`);
+  return Array.isArray(rows)?rows.map(toClientTool):[];
 }
 
 async function syncToolsFromServer(){
-  const state=getToolsSyncState();
-  if(state.pending){
-    try{
-      let push=await putToolsToServer(tools());
-      if(!push.ok){
-        const normalized=normalizeToolsForServer(tools());
-        push=await putToolsToServer(normalized);
-        if(push.ok){
-          saveTools(normalized);
-          window.dispatchEvent(new Event('tools-updated'));
-        }
-      }
-      if(push.ok){
-        setToolsSyncState({pending:false,lastSyncedAt:Date.now()});
-        return true;
-      }
-      return false;
-    }catch{return false}
-  }
   try{
-    const r=await fetch(`${API_BASE}/api/tools`,{headers:{'Accept':'application/json'}});
-    if(!r.ok) return false;
-    const serverTools=await r.json();
-    if(Array.isArray(serverTools)&&serverTools.length){
-      saveTools(serverTools);
-      window.dispatchEvent(new Event('tools-updated'));
-      return true;
-    }
-    return false;
-  }catch{return false}
-}
-async function saveToolsEverywhere(t){
-  saveTools(t);
-  window.dispatchEvent(new Event('tools-updated'));
-  try{
-    let result=await putToolsToServer(t);
-    if(!result.ok){
-      const normalized=normalizeToolsForServer(t);
-      result=await putToolsToServer(normalized);
-      if(result.ok){
-        saveTools(normalized);
-        window.dispatchEvent(new Event('tools-updated'));
-      }
-    }
-    if(result.ok){
-      setToolsSyncState({pending:false,lastSyncedAt:Date.now()});
-      return {ok:true,synced:true,message:''};
-    }
-    setToolsSyncState({pending:true,lastFailedAt:Date.now()});
-    return {ok:false,synced:false,message:result?.body?.details||result?.body?.error||`http_${result?.status||0}`};
+    const serverTools=await fetchToolsFromServer();
+    saveTools(serverTools);
+    window.dispatchEvent(new Event('tools-updated'));
+    return true;
   }catch{
     setToolsSyncState({pending:true,lastFailedAt:Date.now()});
-    return {ok:true,synced:false,message:'network_error'}
+    return false;
   }
+}
+async function createToolOnServer(tool){
+  const payload=toServerToolPayload({...(tool||{}),id:tool?.id||createToolId()});
+  await apiJson(`${API_BASE}/api/tools`,{method:'POST',headers:{'Content-Type':'application/json'},body:j(payload)});
+}
+async function updateToolOnServer(id,tool){
+  const payload=toServerToolPayload({...(tool||{}),id});
+  await apiJson(`${API_BASE}/api/tools/${encodeURIComponent(id)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:j(payload)});
 }
 async function fetchOrdersFromServer(){
   try{
-    const r=await fetch(`${API_BASE}/api/orders`,{headers:{'Accept':'application/json'}});
+    const r=await fetch(`${API_BASE}/api/orders?_=${Date.now()}`,{headers:{'Accept':'application/json','Cache-Control':'no-cache'},cache:'no-store'});
     if(!r.ok) return [];
     const rows=await r.json();
     return Array.isArray(rows)?rows:[];
   }catch{return []}
+}
+let toolsRealtimeSource=null;
+let supabaseRealtimeChannel=null;
+async function initToolsRealtime(){
+  if(toolsRealtimeSource) return;
+  try{
+    const cfg=await apiJson(`${API_BASE}/api/realtime-config?_=${Date.now()}`);
+    const mod=await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+    const sb=mod.createClient(cfg.url,cfg.anonKey);
+    const ch=sb.channel(`tools-live-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes',{event:'*',schema:'public',table:'tools'},()=>{syncToolsFromServer();})
+      .subscribe();
+    supabaseRealtimeChannel=ch;
+    toolsRealtimeSource={type:'supabase',client:sb};
+  }catch{
+    try{
+      const es=new EventSource(`${API_BASE}/api/tools/stream`);
+      es.onmessage=()=>{syncToolsFromServer();};
+      es.onerror=()=>{};
+      toolsRealtimeSource=es;
+    }catch{}
+  }
 }
 async function updateOrderStatusOnServer(orderId,status){
   try{
@@ -203,6 +229,7 @@ function renderCatalog(){
     });
   };
   q?.addEventListener('input',draw);
+  window.addEventListener('tools-updated',draw);
   draw();
 }
 
@@ -229,22 +256,43 @@ const filesToDataUrls=async (input)=>{
   return out.filter(Boolean);
 };
 const normalizeToolMedia=(tool)=>{
-  const list=Array.isArray(tool?.media)&&tool.media.length?tool.media.filter(Boolean):[];
+  const list=Array.isArray(tool?.media_urls)&&tool.media_urls.length?tool.media_urls.filter(Boolean):(Array.isArray(tool?.media)&&tool.media.length?tool.media.filter(Boolean):[]);
   const fallback=tool?.image?[tool.image]:[];
   return list.length?list:fallback;
 };
-const generateNewToolId=(allTools=[])=>{
-  const ids=(allTools||[]).map(t=>t?.id).filter(v=>v!==undefined&&v!==null);
-  const hasNumericIds=ids.some(v=>typeof v==='number' || /^\d+$/.test(String(v)));
-  if(hasNumericIds){
-    const maxNumeric=ids.reduce((max,v)=>{
-      const n=Number(v);
-      return Number.isFinite(n)?Math.max(max,n):max;
-    },0);
-    return maxNumeric+1;
-  }
-  return 't'+Date.now();
+const isVideoUrl=(url='')=>/\.(mp4|webm)(\?|#|$)/i.test(String(url));
+const renderMediaPreview=(containerId,urls=[])=>{
+  const el=$(containerId); if(!el) return;
+  const clean=Array.from(new Set((urls||[]).map(v=>String(v||'').trim()).filter(Boolean)));
+  if(!clean.length){el.innerHTML=''; return;}
+  el.innerHTML=clean.map((url,i)=>`<div class='media-preview-item'>${isVideoUrl(url)?`<video src='${url}' controls preload='metadata' muted playsinline></video>`:`<img src='${url}' alt='media ${i+1}'>`}<small>${i+1}</small></div>`).join('');
 };
+const setUploadMsg=(id,text,color)=>{if(!$(id))return; $(id).textContent=text||''; $(id).style.color=color||'';};
+const uploadFilesToServer=async (inputId,msgId)=>{
+  const input=$(inputId);
+  const files=Array.from(input?.files||[]).filter(Boolean);
+  if(!files.length) return [];
+  const allowed=['image/jpeg','image/png','image/webp','video/mp4','video/webm'];
+  const maxBytes=20*1024*1024;
+  const invalid=files.find(f=>!allowed.includes(String(f.type||'').toLowerCase()));
+  if(invalid){setUploadMsg(msgId,'סוג קובץ לא נתמך. מותר: jpg/png/webp/mp4/webm','#dc3545'); return [];}
+  const tooLarge=files.find(f=>(f?.size||0)>maxBytes);
+  if(tooLarge){setUploadMsg(msgId,'קובץ גדול מדי. מקסימום 20MB לקובץ.','#dc3545'); return [];}
+  setUploadMsg(msgId,'מעלה קבצים...','#0d6efd');
+  try{
+    const payload=await Promise.all(files.map(async f=>({name:f.name,type:f.type,dataUrl:await fileToDataUrl(f)})));
+    const r=await fetch(`${API_BASE}/api/media/upload`,{method:'POST',headers:{'Content-Type':'application/json'},body:j({files:payload})});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok){setUploadMsg(msgId,`העלאה נכשלה: ${data?.details||data?.error||'שגיאה לא ידועה'}`,'#dc3545');return [];}
+    const urls=Array.isArray(data?.urls)?data.urls.filter(Boolean):[];
+    setUploadMsg(msgId,`הועלו ${urls.length} קבצים בהצלחה`,'#198754');
+    return urls;
+  }catch{
+    setUploadMsg(msgId,'שגיאת רשת בהעלאה','#dc3545');
+    return [];
+  }
+};
+const generateNewToolId=()=>createToolId();
 function renderSchedule(){
   const s=$('selectedTool'),picker=$('dateRangePicker'); if(!s||!picker)return;
   $('cartSummary').textContent='בחרו תאריך לכלי הנבחר';
@@ -406,6 +454,12 @@ function initContactForm(){
 
 function renderAdmin(){
   if(!$('adminLoginPanel'))return;
+  const mergeMediaIntoField=(fieldId,newUrls=[])=>{
+    const existing=parseMediaInput($(fieldId)?.value||'');
+    const merged=Array.from(new Set([...existing,...newUrls]));
+    if($(fieldId)) $(fieldId).value=merged.join('\n');
+    return merged;
+  };
   const setAdminMsg=(text,color)=>{
     if(!$('adminActionMsg')) return;
     $('adminActionMsg').textContent=text||'';
@@ -414,6 +468,8 @@ function renderAdmin(){
   const clearAddToolForm=()=>{
     ['newToolName','newToolPrice','newToolDeposit','newToolMaxDays','newToolCategory','newToolImage','newToolMedia','newToolDesc'].forEach(id=>{if($(id)) $(id).value='';});
     if($('newToolMediaFiles')) $('newToolMediaFiles').value='';
+    renderMediaPreview('newToolMediaPreview',[]);
+    setUploadMsg('newToolMediaUploadMsg','');
     if($('newToolName')) $('newToolName').focus();
   };
   const show=v=>{$('adminLoginPanel').style.display=v?'none':'block'; $('adminPanel').style.display=v?'block':'none'; $('adminToolsPanel').style.display=v?'block':'none'; if(v)renderAdminList();};
@@ -472,35 +528,127 @@ function renderAdmin(){
     $('editToolCategory').value=t.category||'';
     $('editToolImage').value=t.image||'';
     $('editToolMedia').value=media.join('\n');
+    renderMediaPreview('editToolMediaPreview',media);
+    setUploadMsg('editToolMediaUploadMsg','');
     $('editToolStatus').value=t.status||'available';
     $('editToolBusyDates').value=(t.busyDates||[]).join(', ');
     $('editToolDesc').value=t.desc||'';
   };
-  $('editToolSelect').onchange=loadEditForm;
-  $('addToolBtn').onclick=async ()=>{const btn=$('addToolBtn'); const t=tools(),name=$('newToolName').value.trim(),desc=$('newToolDesc').value.trim(),price=+($('newToolPrice').value||0); if(!name||!desc||price<=0){setAdminMsg('נא למלא שם/מחיר/תיאור','#dc3545');return;} const textMedia=parseMediaInput(($('newToolMedia')?.value||'')); const uploadedMedia=await filesToDataUrls($('newToolMediaFiles')); const media=Array.from(new Set([...textMedia,...uploadedMedia])); const image=$('newToolImage').value||media[0]||`https://picsum.photos/seed/${encodeURIComponent(name)}/600/400`; t.unshift({id:generateNewToolId(t),name,desc,price,deposit:+$('newToolDeposit').value||3000,maxDays:+$('newToolMaxDays').value||2,category:$('newToolCategory').value||'כלי',image,media:media.length?media:[image],busyDates:[],status:'available'}); if(btn){btn.disabled=true;btn.textContent='מוסיף...';} const saveResult=await saveToolsEverywhere(t); if(btn){btn.disabled=false;btn.textContent='הוסף כלי';} fill(); renderAdminList(); clearAddToolForm(); if(saveResult.synced){setAdminMsg(`הכלי "${name}" נוסף ונשמר בהצלחה לכולם. אפשר להוסיף כלי נוסף.`,'#198754');} else {const details=saveResult.message&&saveResult.message!=='network_error'?` פרטי שגיאה: ${saveResult.message}`:''; setAdminMsg(`הכלי "${name}" נוסף מקומית, אבל כרגע לא נשמר לשרת.${saveResult.message==='network_error'?' בדקו חיבור אינטרנט.':''}${details}`,'#fd7e14');}};
-  $('saveEditToolBtn').onclick=async ()=>{
-    const t=tools(),x=t.find(v=>v.id===$('editToolSelect').value); if(!x)return;
-    const textMedia=parseMediaInput(($('editToolMedia')?.value||''));
-    const uploadedMedia=await filesToDataUrls($('editToolMediaFiles'));
-    const media=Array.from(new Set([...textMedia,...uploadedMedia]));
-    x.name=$('editToolName').value.trim()||x.name;
-    x.price=+($('editToolPrice').value||x.price||0);
-    x.deposit=+($('editToolDeposit').value||x.deposit||0);
-    x.maxDays=+($('editToolMaxDays').value||x.maxDays||0);
-    x.category=$('editToolCategory').value.trim()||x.category||'כלי';
-    x.image=$('editToolImage').value.trim()||media[0]||x.image;
-    x.media=media.length?media:normalizeToolMedia(x);
-    x.status=$('editToolStatus').value||x.status||'available';
-    x.busyDates=$('editToolBusyDates').value.split(',').map(s=>s.trim()).filter(Boolean);
-    x.desc=$('editToolDesc').value.trim()||x.desc;
-    const saveResult=await saveToolsEverywhere(t);
-    if(saveResult.synced) setAdminMsg('העריכה נשמרה בהצלחה ומעודכנת לכל המשתמשים','#198754');
-    else setAdminMsg('העריכה נשמרה מקומית בלבד (אין כרגע סנכרון לשרת).','#fd7e14');
+  if($('newToolMedia')) $('newToolMedia').addEventListener('input',()=>renderMediaPreview('newToolMediaPreview',parseMediaInput($('newToolMedia').value||'')));
+  if($('editToolMedia')) $('editToolMedia').addEventListener('input',()=>renderMediaPreview('editToolMediaPreview',parseMediaInput($('editToolMedia').value||'')));
+  if($('newToolMediaFiles')) $('newToolMediaFiles').addEventListener('change',async ()=>{
+    const urls=await uploadFilesToServer('newToolMediaFiles','newToolMediaUploadMsg');
+    if($('newToolMediaFiles')) $('newToolMediaFiles').value='';
+    if(urls.length){
+      const merged=mergeMediaIntoField('newToolMedia',urls);
+      renderMediaPreview('newToolMediaPreview',merged);
+      if(!$('newToolImage').value.trim()) $('newToolImage').value=merged[0]||'';
+    }
+  });
+  if($('editToolMediaFiles')) $('editToolMediaFiles').addEventListener('change',async ()=>{
+    const urls=await uploadFilesToServer('editToolMediaFiles','editToolMediaUploadMsg');
     if($('editToolMediaFiles')) $('editToolMediaFiles').value='';
-    fill(); renderAdminList();
+    if(urls.length){
+      const merged=mergeMediaIntoField('editToolMedia',urls);
+      renderMediaPreview('editToolMediaPreview',merged);
+      if(!$('editToolImage').value.trim()) $('editToolImage').value=merged[0]||'';
+    }
+  });
+  $('editToolSelect').onchange=loadEditForm;
+  const stringifyServerError=(err)=>{
+    try{return JSON.stringify(err?.body||err||{error:'unknown_error'});}catch{return '{"error":"unknown_error"}';}
   };
-  $('saveBusyDatesBtn').onclick=async ()=>{const t=tools(),x=t.find(v=>v.id===$('availToolSelect').value); if(!x)return; x.busyDates=$('busyDates').value.split(',').map(s=>s.trim()).filter(Boolean); const saveResult=await saveToolsEverywhere(t); if(saveResult.synced) setAdminMsg('הזמינות נשמרה בהצלחה','#198754'); else setAdminMsg('הזמינות נשמרה מקומית בלבד (אין כרגע סנכרון לשרת).','#fd7e14');};
-  $('saveMaintBtn').onclick=async ()=>{const t=tools(),x=t.find(v=>v.id===$('maintToolSelect').value); if(!x)return; x.status=$('maintStatus').value; const saveResult=await saveToolsEverywhere(t); if(saveResult.synced) setAdminMsg('התחזוקה נשמרה בהצלחה','#198754'); else setAdminMsg('התחזוקה נשמרה מקומית בלבד (אין כרגע סנכרון לשרת).','#fd7e14'); renderAdminList();};
+  $('addToolBtn').onclick=async ()=>{
+    const btn=$('addToolBtn');
+    const name=$('newToolName').value.trim();
+    const desc=$('newToolDesc').value.trim();
+    const price=+($('newToolPrice').value||0);
+    if(!name||!desc||price<=0){setAdminMsg('נא למלא שם/מחיר/תיאור','#dc3545');return;}
+    const media=parseMediaInput(($('newToolMedia')?.value||''));
+    const image=$('newToolImage').value||media[0]||`https://picsum.photos/seed/${encodeURIComponent(name)}/600/400`;
+    const newTool={
+      id:generateNewToolId(),
+      name,
+      category:$('newToolCategory').value||'כלי',
+      price,
+      deposit:+$('newToolDeposit').value||3000,
+      maxDays:+$('newToolMaxDays').value||2,
+      is_available:true,
+      maintenance:false,
+      alerts:[],
+      image_url:image,
+      description:desc,
+      media_urls:media.length?media:[image],
+      busyDates:[]
+    };
+    if(btn){btn.disabled=true;btn.textContent='מוסיף...';}
+    try{
+      await createToolOnServer(newTool);
+      await syncToolsFromServer();
+      fill(); renderAdminList(); clearAddToolForm();
+      setAdminMsg(`הכלי "${name}" נוסף ונשמר בהצלחה לכולם. אפשר להוסיף כלי נוסף.`,'#198754');
+    }catch(err){
+      setAdminMsg(stringifyServerError(err),'#dc3545');
+    }finally{
+      if(btn){btn.disabled=false;btn.textContent='הוסף כלי';}
+    }
+  };
+  $('saveEditToolBtn').onclick=async ()=>{
+    const x=tools().find(v=>v.id===$('editToolSelect').value); if(!x)return;
+    const media=parseMediaInput(($('editToolMedia')?.value||''));
+    const normalizedMedia=media.length?media:normalizeToolMedia(x);
+    const edited={
+      ...x,
+      id:x.id,
+      name:$('editToolName').value.trim()||x.name,
+      price:+($('editToolPrice').value||x.price||0),
+      deposit:+($('editToolDeposit').value||x.deposit||0),
+      maxDays:+($('editToolMaxDays').value||x.maxDays||0),
+      category:$('editToolCategory').value.trim()||x.category||'כלי',
+      image_url:$('editToolImage').value.trim()||normalizedMedia[0]||x.image,
+      description:$('editToolDesc').value.trim()||x.desc,
+      media_urls:normalizedMedia,
+      busyDates:$('editToolBusyDates').value.split(',').map(s=>s.trim()).filter(Boolean),
+      is_available:($('editToolStatus').value||x.status||'available')!=='maintenance',
+      maintenance:($('editToolStatus').value||x.status||'available')==='maintenance',
+      alerts:Array.isArray(x.alerts)?x.alerts:[]
+    };
+    try{
+      await updateToolOnServer(x.id,edited);
+      await syncToolsFromServer();
+      setAdminMsg('העריכה נשמרה בהצלחה ומעודכנת לכל המשתמשים','#198754');
+      renderMediaPreview('editToolMediaPreview',normalizedMedia);
+      if($('editToolMediaFiles')) $('editToolMediaFiles').value='';
+      fill(); renderAdminList();
+    }catch(err){
+      setAdminMsg(stringifyServerError(err),'#dc3545');
+    }
+  };
+  $('saveBusyDatesBtn').onclick=async ()=>{
+    const x=tools().find(v=>v.id===$('availToolSelect').value); if(!x)return;
+    const edited={...x,busyDates:$('busyDates').value.split(',').map(s=>s.trim()).filter(Boolean)};
+    try{
+      await updateToolOnServer(x.id,edited);
+      await syncToolsFromServer();
+      setAdminMsg('הזמינות נשמרה בהצלחה','#198754');
+      fill(); renderAdminList();
+    }catch(err){
+      setAdminMsg(stringifyServerError(err),'#dc3545');
+    }
+  };
+  $('saveMaintBtn').onclick=async ()=>{
+    const x=tools().find(v=>v.id===$('maintToolSelect').value); if(!x)return;
+    const status=$('maintStatus').value||'available';
+    const edited={...x,status,is_available:status!=='maintenance',maintenance:status==='maintenance'};
+    try{
+      await updateToolOnServer(x.id,edited);
+      await syncToolsFromServer();
+      setAdminMsg('התחזוקה נשמרה בהצלחה','#198754');
+      fill(); renderAdminList();
+    }catch(err){
+      setAdminMsg(stringifyServerError(err),'#dc3545');
+    }
+  };
   renderOrdersTable();
   fill(); renderAdminList();
 }
@@ -510,14 +658,21 @@ function openStatement(){const txt='הצהרת נגישות: האתר פועל �
 function openReport(){const m=document.createElement('div'); m.className='modal'; m.innerHTML=`<div class='modal-content'><h3>דיווח הפרה</h3><div class='form-grid'><div><label>שם</label><input id='rn'></div><div><label>טלפון</label><input id='rp'></div><div><label>סיבת פניה</label><input id='rr'></div><div style='grid-column:1/-1'><label>תוכן</label><textarea id='rc'></textarea></div></div><div class='actions'><button id='sendr' class='primary'>שליחה</button><button id='cls' class='secondary'>סגירה</button></div></div>`; document.body.appendChild(m); m.querySelector('#cls').onclick=()=>m.remove(); m.querySelector('#sendr').onclick=()=>{const body=`שם: ${m.querySelector('#rn').value}\nטלפון: ${m.querySelector('#rp').value}\nסיבה: ${m.querySelector('#rr').value}\nתוכן: ${m.querySelector('#rc').value}`; location.href=`mailto:tec_ele1@017.net.il?subject=דיווח%20הפרת%20נגישות&body=${encodeURIComponent(body)}`;};}
 function initAccess(){const b=$('accessBtn'),pnl=$('accessPanel'); if(!b||!pnl)return; const opts=[['mono','מונוכרום'],['sepia','ספיה'],['hc','ניגודיות'],['statement','הצהרה'],['report','דיווח'],['reset','איפוס']]; pnl.innerHTML=opts.map(([k,t])=>`<button data-k='${k}' class='secondary'>${t}</button>`).join(''); b.onclick=()=>pnl.classList.toggle('open'); pnl.querySelectorAll('button').forEach(x=>x.onclick=()=>{const k=x.dataset.k; if(['mono','sepia','hc'].includes(k)) document.body.classList.toggle(k); else if(k==='statement') openStatement(); else if(k==='report') openReport(); else document.body.className='';});}
 
-if(document.body.dataset.page==='catalog')renderCatalog();
-if(document.body.dataset.page==='schedule')renderSchedule();
-if(document.body.dataset.page==='payment')renderPayment();
-if(document.body.dataset.page==='admin')renderAdmin();
-initContactForm();
-initAdminLinkVisibility();
-ensureAdminFooterLink();
-syncToolsFromServer();
-setInterval(syncToolsFromServer,30000);
-initAccess();
-initTopActions();
+async function initApp(){
+  const page=document.body.dataset.page||'';
+  initContactForm();
+  initAdminLinkVisibility();
+  ensureAdminFooterLink();
+  if(toolPages.has(page)){
+    await syncToolsFromServer();
+    initToolsRealtime();
+    setInterval(syncToolsFromServer,30000);
+  }
+  if(page==='catalog')renderCatalog();
+  if(page==='schedule')renderSchedule();
+  if(page==='payment')renderPayment();
+  if(page==='admin')renderAdmin();
+  initAccess();
+  initTopActions();
+}
+initApp();

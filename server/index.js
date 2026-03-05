@@ -12,6 +12,7 @@ const PORT = process.env.PORT || 10000;
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const MANAGER_EMAIL = process.env.MANAGER_EMAIL || 'tec_ele1@017.net.il';
 const FROM_EMAIL = process.env.FROM_EMAIL || 'Techno Electric <onboarding@resend.dev>';
@@ -42,7 +43,8 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS.j
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || origin === 'null' || allowedOrigins.includes(origin)) {
+      const isLocalhostDev = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(String(origin || ''));
+      if (!origin || origin === 'null' || allowedOrigins.includes(origin) || isLocalhostDev) {
         callback(null, true);
         return;
       }
@@ -257,9 +259,18 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+app.get('/api/realtime-config', (req, res) => {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    res.status(503).json({ error: 'Realtime config is missing on server' });
+    return;
+  }
+  res.json({ url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY });
+});
+
 app.get('/api/tools', async (req, res) => {
   const { data, error } = await supabase.from('tools').select('*').order('id', { ascending: true });
   if (error) {
+    console.error('[GET /api/tools] error:', error.message, error.details, error.hint, error.code);
     res.status(500).json({ error: 'Failed to fetch tools', details: error.message });
     return;
   }
@@ -305,7 +316,7 @@ app.post('/api/tools', async (req, res) => {
   const insertPayload = payload.id ? payload : { ...payload, id: undefined };
   const { data, error } = await supabase.from('tools').insert(insertPayload).select('*').single();
   if (error) {
-    console.error('[POST /api/tools] error:', error.message, error.details);
+    console.error('[POST /api/tools] error:', error.message, error.details, error.hint, error.code);
     res.status(500).json({ error: 'Failed to create tool', details: error.message });
     return;
   }
@@ -321,7 +332,7 @@ app.put('/api/tools/:id', async (req, res) => {
   const payload = mapClientToolToDb({ ...(req.body || {}), id });
   const { data, error } = await supabase.from('tools').update(payload).eq('id', id).select('*').single();
   if (error) {
-    console.error('[PUT /api/tools/:id] error:', error.message, error.details);
+    console.error('[PUT /api/tools/:id] error:', error.message, error.details, error.hint, error.code);
     res.status(500).json({ error: 'Failed to update tool', details: error.message });
     return;
   }
@@ -336,7 +347,7 @@ app.delete('/api/tools/:id', async (req, res) => {
   }
   const { error } = await supabase.from('tools').delete().eq('id', id);
   if (error) {
-    console.error('[DELETE /api/tools/:id] error:', error.message, error.details);
+    console.error('[DELETE /api/tools/:id] error:', error.message, error.details, error.hint, error.code);
     res.status(500).json({ error: 'Failed to delete tool', details: error.message });
     return;
   }
@@ -364,6 +375,7 @@ app.put('/api/tools', async (req, res) => {
     .select('*');
 
   if (error) {
+    console.error('[PUT /api/tools] error:', error.message, error.details, error.hint, error.code);
     res.status(500).json({ error: 'Failed to update tools', details: error.message });
     return;
   }

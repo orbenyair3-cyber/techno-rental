@@ -8,7 +8,12 @@ Server folder: `server/` (Node.js + Express + Supabase)
 
 - `GET /health`
 - `GET /api/tools`
+- `GET /api/tools/stream` (SSE stream backed by Supabase realtime on `public.tools`)
+- `POST /api/tools`
+- `PUT /api/tools/:id`
+- `DELETE /api/tools/:id`
 - `PUT /api/tools`
+- `POST /api/media/upload` (uploads images/videos to Supabase Storage bucket `tool-media`)
 - `GET /api/orders`
 - `POST /api/orders`
 - `PUT /api/orders/:id` (status: `approved` / `cancelled`)
@@ -60,6 +65,48 @@ add column if not exists customer_email text;
 Migration file in repo:
 
 - `server/migrations/001_add_customer_email.sql`
+- `server/migrations/002_add_tools_media_urls.sql`
+- `server/migrations/003_align_tools_table.sql`
+
+Run also:
+
+```sql
+alter table public.tools
+add column if not exists media_urls text[] default '{}'::text[];
+```
+
+Alignment migration also ensures table/columns exist:
+
+- `id` (uuid)
+- `name`
+- `category`
+- `price`
+- `deposit`
+- `max_days`
+- `image_url`
+- `description`
+- `media_urls` (text[])
+- `busydates` (jsonb)
+- `is_available` (boolean)
+
+## Tool media uploads (gallery/camera files)
+
+- Storage bucket name: `tool-media` (public)
+- Allowed types:
+  - images: `jpg`, `png`, `webp`
+  - videos: `mp4`, `webm`
+- Max size: `20MB` per file
+- Admin selects files in `admin.html` → backend uploads to Supabase Storage
+- Public URLs are returned and saved in `tools.media_urls` (`text[]`)
+
+## Global sync, realtime and no-cache
+
+- Frontend treats backend/Supabase as source of truth, then caches locally for fallback only.
+- After tool changes, frontend immediately refetches `GET /api/tools`.
+- Realtime updates are pushed via `GET /api/tools/stream` (SSE) which listens to Supabase realtime events on `public.tools`.
+- API routes under `/api` send no-cache headers (`Cache-Control: no-store` etc.).
+- Frontend requests include cache-busting query (`?_=${Date.now()}`) and no-store fetch mode.
+- HTML pages load script as `app.js?v=20260305` for cache-busting.
 
 ---
 
