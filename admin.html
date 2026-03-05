@@ -46,7 +46,13 @@
           <div><label for="editToolSelect">בחר כלי</label><select id="editToolSelect"></select></div>
           <div><label for="editToolName">שם</label><input id="editToolName" /></div>
           <div><label for="editToolPrice">מחיר</label><input id="editToolPrice" type="number" /></div>
-          <div><label for="editToolDesc">תיאור</label><input id="editToolDesc" /></div>
+          <div><label for="editToolDeposit">פיקדון</label><input id="editToolDeposit" type="number" /></div>
+          <div><label for="editToolMaxDays">מקס' ימים</label><input id="editToolMaxDays" type="number" /></div>
+          <div><label for="editToolCategory">קטגוריה</label><input id="editToolCategory" /></div>
+          <div><label for="editToolImage">תמונה</label><input id="editToolImage" /></div>
+          <div><label for="editToolStatus">סטטוס</label><select id="editToolStatus"><option value="available">זמין</option><option value="maintenance">בתחזוקה</option></select></div>
+          <div><label for="editToolBusyDates">תאריכים תפוסים (פסיק)</label><input id="editToolBusyDates" /></div>
+          <div style="grid-column:1/-1"><label for="editToolDesc">תיאור</label><textarea id="editToolDesc"></textarea></div>
         </div>
         <button id="saveEditToolBtn" class="primary">שמור עריכה</button>
       </div>

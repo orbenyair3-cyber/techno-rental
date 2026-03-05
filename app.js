@@ -1,11 +1,36 @@
 
-const STORAGE_KEY='technoTools',CART_KEY='technoCart',BOOKING_KEY='technoBooking',ADMIN_KEY='technoAdminLogged',ADMIN_USERNAME='Gal65',ADMIN_PASSWORD='Gal65$';
+const STORAGE_KEY='technoTools',CART_KEY='technoCart',BOOKING_KEY='technoBooking',ADMIN_KEY='technoAdminLogged',ADMIN_USERNAME='Gal65',ADMIN_PASSWORD='Gal65$',API_BASE='/api';
 const defaults=['מקדחת יהלום','מקדחת אדמה','קונגו','מכונת פוליש','שואב אבק תעשייתי','גנרטור','מחרצת בטון','אקדח מסמרים עם מדחס','רמפה לגובה 1.8 מטר משקל 1 טון','פטישון נטען','מדחס אויר','מכונה לחידוש דקים','משאבת טבילה','משאבת מים'].map((n,i)=>({id:'t'+(i+1),name:n,desc:'תיאור כלי מקצועי',price:400,deposit:3000,maxDays:2,category:'כלי עבודה',image:`https://picsum.photos/seed/${encodeURIComponent(n)}/600/400`,busyDates:[],status:'available'}));
 const $=id=>document.getElementById(id), j=v=>JSON.stringify(v), p=v=>{try{return JSON.parse(v)}catch{return null}};
 const tools=()=>p(localStorage.getItem(STORAGE_KEY))||defaults, saveTools=t=>localStorage.setItem(STORAGE_KEY,j(t));
 const cart=()=>p(localStorage.getItem(CART_KEY))||[], saveCart=c=>localStorage.setItem(CART_KEY,j(c));
 const booking=()=>p(localStorage.getItem(BOOKING_KEY))||{}, saveBooking=b=>localStorage.setItem(BOOKING_KEY,j(b));
 if(!localStorage.getItem(STORAGE_KEY)) saveTools(defaults);
+
+async function syncToolsFromServer(){
+  try{
+    const r=await fetch(`${API_BASE}/tools`,{headers:{'Accept':'application/json'}});
+    if(!r.ok) return;
+    const serverTools=await r.json();
+    if(Array.isArray(serverTools)&&serverTools.length){
+      saveTools(serverTools);
+      window.dispatchEvent(new Event('tools-updated'));
+    }
+  }catch{}
+}
+async function saveToolsEverywhere(t){
+  saveTools(t);
+  window.dispatchEvent(new Event('tools-updated'));
+  try{
+    await fetch(`${API_BASE}/tools`,{method:'PUT',headers:{'Content-Type':'application/json'},body:j(t)});
+  }catch{}
+}
+async function sendOrderToAdmin(payload){
+  try{
+    const r=await fetch(`${API_BASE}/orders`,{method:'POST',headers:{'Content-Type':'application/json'},body:j(payload)});
+    return r.ok;
+  }catch{return false}
+}
 
 function initTopActions(){
   const wrap=document.createElement('div');
@@ -28,7 +53,7 @@ function renderCatalog(){
       g.appendChild(d);
     });
     g.querySelectorAll('.choose').forEach(b=>b.onclick=()=>{
-      saveBooking({toolId:b.dataset.id, selectedDates:[], pickupType:'איסוף עצמי'});
+      saveBooking({toolId:b.dataset.id, selectedDates:[], pickupType:'בת שלמה'});
       location.href='schedule.html';
     });
   };
@@ -54,7 +79,7 @@ function renderSchedule(){
   $('cartSummary').textContent='בחרו תאריך לכלי הנבחר';
   const all=tools();
   s.innerHTML=all.map(x=>`<option value='${x.id}'>${x.name}</option>`).join('');
-  const b=booking(); if(b.toolId)s.value=b.toolId; $('pickupType').value=b.pickupType||'איסוף עצמי';
+  const b=booking(); if(b.toolId)s.value=b.toolId; $('pickupType').value=b.pickupType||'בת שלמה';
   const buildRange=(start,end)=>{
     if(!start||!end) return [];
     const out=[];
@@ -106,13 +131,28 @@ function renderPayment(){
   const t=tools(), b=booking();
   const toolName=(t.find(x=>x.id===b.toolId)||{}).name || 'לא נבחר';
   const selectedDates = (b.selectedDates||[]).join(', ') || '-';
-  $('orderSummary').textContent=`כלי: ${toolName} | תאריכים: ${selectedDates} | איסוף: ${b.pickupType||'איסוף עצמי'}`;
-  $('confirmPayment').onclick=()=>{
+  $('orderSummary').textContent=`כלי: ${toolName} | תאריכים: ${selectedDates} | איסוף: ${b.pickupType||'בת שלמה'}`;
+  $('confirmPayment').onclick=async ()=>{
     const req=['invoiceName','customerPhone','customerEmail'];
     if(req.some(id=>!$(id).value.trim())){ $('paymentMsg').textContent='נא למלא שם לחשבונית, טלפון ואימייל'; $('paymentMsg').style.color='#dc3545'; return; }
-    const body=`הזמנה חדשה מהאתר\n\nשם לחשבונית: ${$('invoiceName').value}\nטלפון: ${$('customerPhone').value}\nאימייל: ${$('customerEmail').value}\nכלי: ${toolName}\nתאריכים: ${selectedDates}\nאיסוף: ${b.pickupType||'איסוף עצמי'}`;
-    location.href=`mailto:tec_ele1@017.net.il?subject=${encodeURIComponent('הזמנה חדשה - אתר השכרה')}&body=${encodeURIComponent(body)}`;
-    $('paymentMsg').textContent='ההזמנה אושרה ונשלחה למנהל במייל.'; $('paymentMsg').style.color='#198754';
+    const orderData={
+      invoiceName:$('invoiceName').value.trim(),
+      customerPhone:$('customerPhone').value.trim(),
+      customerEmail:$('customerEmail').value.trim(),
+      toolName,
+      selectedDates:(b.selectedDates||[]),
+      pickupType:b.pickupType||'בת שלמה',
+      subject:'הזמנה חדשה - אתר השכרה'
+    };
+    $('confirmPayment').disabled=true;
+    const sent=await sendOrderToAdmin(orderData);
+    $('confirmPayment').disabled=false;
+    if(sent){
+      $('paymentMsg').textContent='ההזמנה אושרה ונשלחה למנהל בהצלחה.'; $('paymentMsg').style.color='#198754';
+      return;
+    }
+    $('paymentMsg').textContent='ההזמנה נשמרה אך לא ניתן היה לשלוח אוטומטית למנהל כרגע. נא לנסות שוב בעוד כמה דקות.';
+    $('paymentMsg').style.color='#dc3545';
   };
 }
 
@@ -123,10 +163,40 @@ function renderAdmin(){
   $('managerLoginBtn').onclick=()=>{if($('managerUser').value.trim()===ADMIN_USERNAME&&$('managerPass').value.trim()===ADMIN_PASSWORD){localStorage.setItem(ADMIN_KEY,'1');show(true);}else $('adminLoginMsg').textContent='פרטים שגויים';};
   $('adminLogoutBtn').onclick=()=>{localStorage.setItem(ADMIN_KEY,'0');show(false)};
   document.querySelectorAll('.admin-tab-btn').forEach(b=>b.onclick=()=>{document.querySelectorAll('.admin-tab').forEach(t=>t.classList.add('hidden')); $('tab-'+b.dataset.tab).classList.remove('hidden');});
-  const fill=()=>{const h=tools().map(x=>`<option value='${x.id}'>${x.name}</option>`).join(''); ['editToolSelect','availToolSelect','maintToolSelect'].forEach(id=>$(id).innerHTML=h);};
-  $('addToolBtn').onclick=()=>{const t=tools(),name=$('newToolName').value.trim(),desc=$('newToolDesc').value.trim(),price=+($('newToolPrice').value||0); if(!name||!desc||price<=0){$('adminActionMsg').textContent='נא למלא שם/מחיר/תיאור';return;} t.unshift({id:'t'+Date.now(),name,desc,price,deposit:+$('newToolDeposit').value||3000,maxDays:+$('newToolMaxDays').value||2,category:$('newToolCategory').value||'כלי',image:$('newToolImage').value||`https://picsum.photos/seed/${encodeURIComponent(name)}/600/400`,busyDates:[],status:'available'}); saveTools(t); fill(); renderAdminList();};
-  $('saveBusyDatesBtn').onclick=()=>{const t=tools(),x=t.find(v=>v.id===$('availToolSelect').value); if(!x)return; x.busyDates=$('busyDates').value.split(',').map(s=>s.trim()).filter(Boolean); saveTools(t);};
-  $('saveMaintBtn').onclick=()=>{const t=tools(),x=t.find(v=>v.id===$('maintToolSelect').value); if(!x)return; x.status=$('maintStatus').value; saveTools(t); renderAdminList();};
+  const fill=()=>{const h=tools().map(x=>`<option value='${x.id}'>${x.name}</option>`).join(''); ['editToolSelect','availToolSelect','maintToolSelect'].forEach(id=>$(id).innerHTML=h); loadEditForm();};
+  const loadEditForm=()=>{
+    const t=tools().find(v=>v.id===$('editToolSelect').value) || tools()[0];
+    if(!t) return;
+    $('editToolSelect').value=t.id;
+    $('editToolName').value=t.name||'';
+    $('editToolPrice').value=t.price||0;
+    $('editToolDeposit').value=t.deposit||0;
+    $('editToolMaxDays').value=t.maxDays||0;
+    $('editToolCategory').value=t.category||'';
+    $('editToolImage').value=t.image||'';
+    $('editToolStatus').value=t.status||'available';
+    $('editToolBusyDates').value=(t.busyDates||[]).join(', ');
+    $('editToolDesc').value=t.desc||'';
+  };
+  $('editToolSelect').onchange=loadEditForm;
+  $('addToolBtn').onclick=async ()=>{const t=tools(),name=$('newToolName').value.trim(),desc=$('newToolDesc').value.trim(),price=+($('newToolPrice').value||0); if(!name||!desc||price<=0){$('adminActionMsg').textContent='נא למלא שם/מחיר/תיאור';return;} t.unshift({id:'t'+Date.now(),name,desc,price,deposit:+$('newToolDeposit').value||3000,maxDays:+$('newToolMaxDays').value||2,category:$('newToolCategory').value||'כלי',image:$('newToolImage').value||`https://picsum.photos/seed/${encodeURIComponent(name)}/600/400`,busyDates:[],status:'available'}); await saveToolsEverywhere(t); $('adminActionMsg').textContent='המוצר נוסף ונשמר בהצלחה לכולם'; fill(); renderAdminList();};
+  $('saveEditToolBtn').onclick=async ()=>{
+    const t=tools(),x=t.find(v=>v.id===$('editToolSelect').value); if(!x)return;
+    x.name=$('editToolName').value.trim()||x.name;
+    x.price=+($('editToolPrice').value||x.price||0);
+    x.deposit=+($('editToolDeposit').value||x.deposit||0);
+    x.maxDays=+($('editToolMaxDays').value||x.maxDays||0);
+    x.category=$('editToolCategory').value.trim()||x.category||'כלי';
+    x.image=$('editToolImage').value.trim()||x.image;
+    x.status=$('editToolStatus').value||x.status||'available';
+    x.busyDates=$('editToolBusyDates').value.split(',').map(s=>s.trim()).filter(Boolean);
+    x.desc=$('editToolDesc').value.trim()||x.desc;
+    await saveToolsEverywhere(t);
+    $('adminActionMsg').textContent='העריכה נשמרה בהצלחה ומעודכנת לכל המשתמשים';
+    fill(); renderAdminList();
+  };
+  $('saveBusyDatesBtn').onclick=async ()=>{const t=tools(),x=t.find(v=>v.id===$('availToolSelect').value); if(!x)return; x.busyDates=$('busyDates').value.split(',').map(s=>s.trim()).filter(Boolean); await saveToolsEverywhere(t); $('adminActionMsg').textContent='הזמינות נשמרה בהצלחה';};
+  $('saveMaintBtn').onclick=async ()=>{const t=tools(),x=t.find(v=>v.id===$('maintToolSelect').value); if(!x)return; x.status=$('maintStatus').value; await saveToolsEverywhere(t); $('adminActionMsg').textContent='התחזוקה נשמרה בהצלחה'; renderAdminList();};
   fill(); renderAdminList();
 }
 function renderAdminList(){const l=$('adminToolsList'); if(!l)return; l.innerHTML=tools().map(t=>`<div><strong>${t.name}</strong><span>${t.status==='maintenance'?'בתחזוקה':'זמין'}</span></div>`).join('');}
@@ -139,5 +209,6 @@ if(document.body.dataset.page==='catalog')renderCatalog();
 if(document.body.dataset.page==='schedule')renderSchedule();
 if(document.body.dataset.page==='payment')renderPayment();
 if(document.body.dataset.page==='admin')renderAdmin();
+syncToolsFromServer();
 initAccess();
 initTopActions();
