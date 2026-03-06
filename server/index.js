@@ -103,33 +103,43 @@ function normalizeMediaUrls(tool) {
 function mapDbToolToClient(row) {
   if (!row) return row;
   return {
-    id: row.id,
+    id: row.id || row.public_id,
+    public_id: row.public_id || null,
     name: row.name || '',
     category: row.category || '',
-    price: Number(row.price || 0),
+    price: Number(row.price ?? row.price_per_day ?? 0),
+    price_per_day: Number(row.price_per_day ?? row.price ?? 0),
     deposit: Number(row.deposit || 0),
     maxDays: Number(row.max_days || 0),
     image: row.image_url || row.image || '',
     desc: row.description || row.desc || '',
     media_urls: Array.isArray(row.media_urls) ? row.media_urls : [],
     busyDates: Array.isArray(row.busydates) ? row.busydates : [],
-    status: row.is_available === false ? 'maintenance' : 'available'
+    is_available: row.is_available === undefined ? true : Boolean(row.is_available),
+    maintenance: row.maintenance === undefined ? row.is_available === false : Boolean(row.maintenance),
+    status: row.is_available === false || row.maintenance === true ? 'maintenance' : 'available'
   };
 }
 
 function mapClientToolToDb(tool) {
   const mediaUrls = normalizeMediaUrls(tool);
+  const isAvailable = tool?.is_available !== undefined ? Boolean(tool.is_available) : (tool?.status !== 'maintenance');
+  const maintenance = tool?.maintenance !== undefined ? Boolean(tool.maintenance) : (tool?.status === 'maintenance');
+  const pricePerDay = Number(tool.price_per_day ?? tool.price ?? 0);
   return {
-    id: tool.id || undefined,
+    id: tool.id ?? tool.public_id ?? undefined,
     name: tool.name || '',
     category: tool.category || '',
-    price: Number(tool.price || 0),
+    price: Number(tool.price ?? tool.price_per_day ?? 0),
+    price_per_day: pricePerDay,
     deposit: Number(tool.deposit || 0),
     max_days: Number(tool.max_days ?? tool.maxDays ?? 0),
     image_url: tool.image_url || tool.image || mediaUrls[0] || null,
     description: tool.description || tool.desc || '',
     media_urls: mediaUrls,
-    busydates: Array.isArray(tool.busyDates) ? tool.busyDates : (Array.isArray(tool.busydates) ? tool.busydates : [])
+    busydates: Array.isArray(tool.busyDates) ? tool.busyDates : (Array.isArray(tool.busydates) ? tool.busydates : []),
+    is_available: isAvailable,
+    maintenance
   };
 }
 

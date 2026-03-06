@@ -6,7 +6,33 @@ const SUPABASE_KEY='sb_publishable_wW6wy43I3Z7n2Tn24F6GXg_aAesbAjc';
 const TOOL_MEDIA_BUCKET='tool-media';
 const ALLOWED_MEDIA_TYPES=['image/jpeg','image/png','image/webp','video/mp4','video/webm'];
 const MAX_MEDIA_BYTES=20*1024*1024;
-const DEFAULT_TOOLS=['מקדחת יהלום','מקדחת אדמה','קונגו','מכונת פוליש','שואב אבק תעשייתי','גנרטור','מחרצת בטון','אקדח מסמרים עם מדחס','רמפה לגובה 1.8 מטר משקל 1 טון','פטישון נטען','מדחס אויר','מכונה לחידוש דקים','משאבת טבילה','משאבת מים'].map((n)=>({name:n,category:'כלי עבודה',price:400,deposit:3000,max_days:2,description:'תיאור כלי מקצועי',image_url:`https://picsum.photos/seed/${encodeURIComponent(n)}/600/400`,media_urls:[`https://picsum.photos/seed/${encodeURIComponent(n)}/600/400`]}));
+const FALLBACK_TOOLS=[
+  {name:'מקדחת יהלום',description:'מקדחה מקצועית לקידוח בבטון וחומרים קשים',image_url:'https://picsum.photos/seed/diamond-drill/600/400'},
+  {name:'מקדחת אדמה',description:'מקדחת אדמה חזקה לקידוח מהיר ונוח בקרקע',image_url:'https://picsum.photos/seed/earth-drill/600/400'},
+  {name:'קונגו',description:'פטיש חציבה עוצמתי לעבודות שיפוץ והריסה',image_url:'https://picsum.photos/seed/kango-hammer/600/400'},
+  {name:'מכונת פוליש',description:'מכונת פוליש מקצועית לניקוי והברקת רצפות',image_url:'https://picsum.photos/seed/polisher-machine/600/400'},
+  {name:'שואב אבק תעשייתי',description:'שואב תעשייתי עוצמתי לאבק ופסולת בנייה',image_url:'https://picsum.photos/seed/industrial-vacuum/600/400'},
+  {name:'גנרטור',description:'גנרטור אמין לאספקת חשמל באתרי עבודה ואירועים',image_url:'https://picsum.photos/seed/generator-power/600/400'},
+  {name:'מחרצת בטון',description:'מחרצת בטון מקצועית ליצירת חריצים מדויקים',image_url:'https://picsum.photos/seed/concrete-groover/600/400'},
+  {name:'אקדח מסמרים עם מדחס',description:'ערכת אקדח מסמרים עם מדחס לעבודה מהירה ומדויקת',image_url:'https://picsum.photos/seed/nail-gun-compressor/600/400'},
+  {name:'רמפה לגובה 1.8 מטר משקל 1 טון',description:'רמפה בטיחותית להעמסה ופריקה עד טון',image_url:'https://picsum.photos/seed/loading-ramp/600/400'},
+  {name:'פטישון נטען',description:'פטישון נטען קומפקטי לעבודות קידוח וחציבה קלות',image_url:'https://picsum.photos/seed/cordless-rotary-hammer/600/400'},
+  {name:'מדחס אויר',description:'מדחס אוויר איכותי להפעלת כלי פנאומטיים',image_url:'https://picsum.photos/seed/air-compressor/600/400'},
+  {name:'מכונה לחידוש דקים',description:'מכונה ייעודית לניקוי וחידוש דקים ומשטחי עץ',image_url:'https://picsum.photos/seed/deck-renewal-machine/600/400'},
+  {name:'משאבת טבילה',description:'משאבת טבילה חזקה לניקוז מים במהירות',image_url:'https://picsum.photos/seed/submersible-pump/600/400'},
+  {name:'משאבת מים',description:'משאבת מים רב-שימושית להשקיה והעברת מים',image_url:'https://picsum.photos/seed/water-pump/600/400'}
+].map((t)=>({
+  ...t,
+  category:'כלי עבודה',
+  price:400,
+  price_per_day:400,
+  deposit:3000,
+  max_days:2,
+  media_urls:[t.image_url],
+  busydates:[],
+  is_available:true,
+  maintenance:false
+}));
 const $=id=>document.getElementById(id), j=v=>JSON.stringify(v), p=v=>{try{return JSON.parse(v)}catch{return null}};
 let TOOLS_CACHE=[];
 let supabaseClient=null;
@@ -26,10 +52,11 @@ const toClientTool=(tool={})=>{
   const isAvailable=tool?.is_available===undefined ? tool?.status!=='maintenance' : Boolean(tool?.is_available);
   return {
     ...(tool||{}),
-    id:tool?.id,
+    id:tool?.id??tool?.public_id,
     name:tool?.name||'',
     category:tool?.category||'כלי',
-    price:Number(tool?.price||0),
+    price:Number(tool?.price??tool?.price_per_day??0),
+    price_per_day:Number(tool?.price_per_day??tool?.price??0),
     deposit:Number(tool?.deposit||0),
     maxDays:Number(tool?.maxDays??tool?.max_days??0),
     image,
@@ -45,21 +72,19 @@ const toClientTool=(tool={})=>{
 
 const toServerToolPayload=(tool={})=>{
   const normalized=toClientTool(tool);
-  const busyDates=Array.isArray(normalized.busyDates)
-    ? normalized.busyDates.map((d)=>String(d||'').trim()).filter(Boolean)
-    : (Array.isArray(normalized.busydates)
-      ? normalized.busydates.map((d)=>String(d||'').trim()).filter(Boolean)
-      : []);
   return {
     name:normalized.name,
     category:normalized.category,
-    price:normalized.price,
+    price:Number(normalized.price??normalized.price_per_day??0),
+    price_per_day:Number(normalized.price??normalized.price_per_day??0),
     deposit:normalized.deposit,
     max_days:Number(normalized.maxDays||0),
     image_url:normalized.image_url||normalized.image||'',
     description:normalized.description||normalized.desc||'',
     media_urls:Array.isArray(normalized.media_urls)?normalized.media_urls.filter(Boolean):[],
-    busyDates
+    busydates:Array.isArray(normalized.busyDates)?normalized.busyDates:[],
+    is_available:normalized.is_available!==undefined?Boolean(normalized.is_available):normalized.status!=='maintenance',
+    maintenance:(normalized.status||'available')==='maintenance'
   };
 };
 
@@ -87,19 +112,11 @@ async function syncToolsFromServer(){
     window.dispatchEvent(new Event('tools-updated'));
     return true;
   }catch{
-    setToolsSyncState({pending:true,lastFailedAt:Date.now()});
-    return false;
-  }
-}
-async function bootstrapDefaultToolsIfEmpty(){
-  try{
-    const rows=await fetchToolsFromServer();
-    if(Array.isArray(rows)&&rows.length) return false;
-    for(const tool of DEFAULT_TOOLS){
-      await createToolOnServer(tool);
+    if(!tools().length){
+      saveTools(FALLBACK_TOOLS.map(toClientTool));
+      window.dispatchEvent(new Event('tools-updated'));
     }
-    return true;
-  }catch{
+    setToolsSyncState({pending:true,lastFailedAt:Date.now()});
     return false;
   }
 }
@@ -110,6 +127,9 @@ async function createToolOnServer(tool){
 async function updateToolOnServer(id,tool){
   const payload=toServerToolPayload(tool||{});
   await apiJson(`${API_BASE}/api/tools/${encodeURIComponent(id)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:j(payload)});
+}
+async function deleteToolOnServer(id){
+  await apiJson(`${API_BASE}/api/tools/${encodeURIComponent(id)}`,{method:'DELETE'});
 }
 async function fetchOrdersFromServer(){
   try{
@@ -511,6 +531,28 @@ function renderAdmin(){
     if($('newToolName')) $('newToolName').focus();
   };
   const show=v=>{$('adminLoginPanel').style.display=v?'none':'block'; $('adminPanel').style.display=v?'block':'none'; $('adminToolsPanel').style.display=v?'block':'none'; if(v)renderAdminList();};
+  const wireDeleteButtons=()=>{
+    const list=$('adminToolsList');
+    if(!list) return;
+    list.querySelectorAll('.delete-tool').forEach((btn)=>btn.onclick=async ()=>{
+      const id=btn.dataset.id;
+      if(!id) return;
+      if(!confirm('למחוק את הכלי לצמיתות?')) return;
+      btn.disabled=true;
+      try{
+        await deleteToolOnServer(id);
+        await syncToolsFromServer();
+        fill();
+        renderAdminList();
+        wireDeleteButtons();
+        setAdminMsg('הכלי נמחק בהצלחה','#198754');
+      }catch(err){
+        setAdminMsg(stringifyServerError(err),'#dc3545');
+      }finally{
+        btn.disabled=false;
+      }
+    });
+  };
   show(localStorage.getItem(ADMIN_KEY)==='1');
   $('managerLoginBtn').onclick=()=>{if($('managerUser').value.trim()===ADMIN_USERNAME&&$('managerPass').value.trim()===ADMIN_PASSWORD){localStorage.setItem(ADMIN_KEY,'1');document.documentElement.classList.add('show-admin');show(true);}else $('adminLoginMsg').textContent='פרטים שגויים';};
   $('adminLogoutBtn').onclick=()=>{localStorage.setItem(ADMIN_KEY,'0');document.documentElement.classList.remove('show-admin');show(false)};
@@ -618,7 +660,7 @@ function renderAdmin(){
     try{
       await createToolOnServer(newTool);
       await syncToolsFromServer();
-      fill(); renderAdminList(); clearAddToolForm();
+      fill(); renderAdminList(); wireDeleteButtons(); clearAddToolForm();
       setAdminMsg(`הכלי "${name}" נוסף ונשמר בהצלחה לכולם. אפשר להוסיף כלי נוסף.`,'#198754');
     }catch(err){
       setAdminMsg(stringifyServerError(err),'#dc3545');
@@ -652,7 +694,7 @@ function renderAdmin(){
       setAdminMsg('העריכה נשמרה בהצלחה ומעודכנת לכל המשתמשים','#198754');
       renderMediaPreview('editToolMediaPreview',normalizedMedia);
       if($('editToolMediaFiles')) $('editToolMediaFiles').value='';
-      fill(); renderAdminList();
+      fill(); renderAdminList(); wireDeleteButtons();
     }catch(err){
       setAdminMsg(stringifyServerError(err),'#dc3545');
     }
@@ -664,7 +706,7 @@ function renderAdmin(){
       await updateToolOnServer(x.id,edited);
       await syncToolsFromServer();
       setAdminMsg('הזמינות נשמרה בהצלחה','#198754');
-      fill(); renderAdminList();
+      fill(); renderAdminList(); wireDeleteButtons();
     }catch(err){
       setAdminMsg(stringifyServerError(err),'#dc3545');
     }
@@ -677,20 +719,20 @@ function renderAdmin(){
       await updateToolOnServer(x.id,edited);
       await syncToolsFromServer();
       setAdminMsg('התחזוקה נשמרה בהצלחה','#198754');
-      fill(); renderAdminList();
+      fill(); renderAdminList(); wireDeleteButtons();
     }catch(err){
       setAdminMsg(stringifyServerError(err),'#dc3545');
     }
   };
   renderOrdersTable();
-  fill(); renderAdminList();
+  fill(); renderAdminList(); wireDeleteButtons();
 }
 function renderAdminList(){
   const l=$('adminToolsList');
   if(!l)return;
   l.innerHTML=tools().map(t=>{
     const img=t.image||t.image_url||normalizeToolMedia(t)[0]||'';
-    return `<div style='display:flex;align-items:center;gap:10px;margin-bottom:8px'><img src='${img}' alt='${t.name}' style='width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb'><div><strong>${t.name}</strong><div class='small'>₪${Number(t.price||0)} ליום | פיקדון ₪${Number(t.deposit||0)}</div></div><span style='margin-inline-start:auto'>${t.status==='maintenance'?'בתחזוקה':'זמין'}</span></div>`;
+    return `<div style='display:flex;align-items:center;gap:10px;margin-bottom:8px'><img src='${img}' alt='${t.name}' style='width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb'><div><strong>${t.name}</strong><div class='small'>₪${Number(t.price||0)} ליום | פיקדון ₪${Number(t.deposit||0)}</div></div><span style='margin-inline-start:auto'>${t.status==='maintenance'?'בתחזוקה':'זמין'}</span><button class='danger delete-tool' data-id='${t.id}' type='button'>מחק</button></div>`;
   }).join('');
 }
 
@@ -705,10 +747,6 @@ async function initApp(){
   ensureAdminFooterLink();
   if(toolPages.has(page)){
     await syncToolsFromServer();
-    if(!tools().length){
-      const seeded=await bootstrapDefaultToolsIfEmpty();
-      if(seeded) await syncToolsFromServer();
-    }
     initToolsRealtime();
     setInterval(syncToolsFromServer,30000);
   }
