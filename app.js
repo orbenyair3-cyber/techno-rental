@@ -502,7 +502,7 @@ function initContactForm(){
     setMsg('');
 
     try{
-      const r=await fetch('https://techno-rental.onrender.com/api/contact',{
+      const r=await fetch(`${API_BASE}/api/contact`,{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:j(payload)

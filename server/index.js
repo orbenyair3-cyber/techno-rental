@@ -37,8 +37,10 @@ app.use(cors({
     'http://127.0.0.1:5500'
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control'],
+  credentials: false
 }));
+app.options('*', cors());
 
 app.use(express.json({ limit: '25mb' }));
 app.use('/api', (req, res, next) => {
