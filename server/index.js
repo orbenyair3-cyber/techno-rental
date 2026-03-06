@@ -30,17 +30,19 @@ let toolMediaBucketReady = false;
 const ALLOWED_MEDIA_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/webm']);
 const MAX_MEDIA_FILE_BYTES = 20 * 1024 * 1024;
 
-app.use(cors({
+const corsOptions = {
   origin: [
     'https://orbenyair3-cyber.github.io',
     'http://localhost:3000',
     'http://127.0.0.1:5500'
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'cache-control'],
   credentials: false
-}));
-app.options('*', cors());
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 app.use(express.json({ limit: '25mb' }));
 app.use('/api', (req, res, next) => {

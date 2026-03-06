@@ -89,7 +89,7 @@ const toServerToolPayload=(tool={})=>{
 };
 
 async function apiJson(url,options={}){
-  const r=await fetch(url,{cache:'no-store',headers:{'Accept':'application/json','Cache-Control':'no-cache',...(options.headers||{})},...options});
+  const r=await fetch(url,{cache:'no-store',...options});
   let body=null;
   try{body=await r.json();}catch{}
   if(!r.ok){
@@ -133,7 +133,7 @@ async function deleteToolOnServer(id){
 }
 async function fetchOrdersFromServer(){
   try{
-    const r=await fetch(`${API_BASE}/api/orders?_=${Date.now()}`,{headers:{'Accept':'application/json','Cache-Control':'no-cache'},cache:'no-store'});
+    const r=await fetch(`${API_BASE}/api/orders?_=${Date.now()}`,{cache:'no-store'});
     if(!r.ok) return [];
     const rows=await r.json();
     return Array.isArray(rows)?rows:[];
@@ -163,7 +163,7 @@ async function initToolsRealtime(){
 }
 async function updateOrderStatusOnServer(orderId,status){
   try{
-    const r=await fetch(`${API_BASE}/api/orders/${encodeURIComponent(orderId)}`,{method:'PUT',headers:{'Content-Type':'application/json','Accept':'application/json'},body:j({status})});
+    const r=await fetch(`${API_BASE}/api/orders/${encodeURIComponent(orderId)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:j({status})});
     return r.ok;
   }catch{return false}
 }
