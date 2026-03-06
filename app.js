@@ -354,6 +354,16 @@ const uploadFilesToSupabase=async (inputId,msgId)=>{
 function renderSchedule(){
   const s=$('selectedTool'),picker=$('dateRangePicker'); if(!s||!picker)return;
   $('cartSummary').textContent='בחרו תאריך לכלי הנבחר';
+  const ensureCalendarLegend=()=>{
+    let legend=document.querySelector('.calendar-legend');
+    if(legend) return;
+    legend=document.createElement('div');
+    legend.className='calendar-legend';
+    legend.setAttribute('aria-label','מקרא צבעי לוח שנה');
+    legend.innerHTML="<span><i class='legend-box legend-available' aria-hidden='true'></i> זמין</span><span class='legend-booked-label'><i class='legend-box legend-booked' aria-hidden='true'></i> תפוס</span><span><i class='legend-box legend-selected' aria-hidden='true'></i> נבחר</span>";
+    picker.insertAdjacentElement('afterend',legend);
+  };
+  ensureCalendarLegend();
   const fillTools=()=>{const all=tools(); s.innerHTML=all.map(x=>`<option value='${x.id}'>${x.name}</option>`).join('');};
   fillTools();
   const b=booking(); if(b.toolId)s.value=b.toolId; $('pickupType').value=b.pickupType||'בת שלמה';

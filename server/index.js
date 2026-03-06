@@ -30,30 +30,15 @@ let toolMediaBucketReady = false;
 const ALLOWED_MEDIA_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/webm']);
 const MAX_MEDIA_FILE_BYTES = 20 * 1024 * 1024;
 
-const DEFAULT_ALLOWED_ORIGINS = [
-  'https://orbenyair3-cyber.github.io',
-  'http://localhost:5500',
-  'http://127.0.0.1:5500'
-];
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS.join(','))
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
-
-app.use(
-  cors({
-    origin(origin, callback) {
-      const isLocalhostDev = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(String(origin || ''));
-      if (!origin || origin === 'null' || allowedOrigins.includes(origin) || isLocalhostDev) {
-        callback(null, true);
-        return;
-      }
-      callback(new Error(`CORS blocked for origin: ${origin}`));
-    },
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type']
-  })
-);
+app.use(cors({
+  origin: [
+    'https://orbenyair3-cyber.github.io',
+    'http://localhost:3000',
+    'http://127.0.0.1:5500'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control']
+}));
 
 app.use(express.json({ limit: '25mb' }));
 app.use('/api', (req, res, next) => {
@@ -441,12 +426,14 @@ app.post('/api/orders', async (req, res) => {
   }
 
   try {
+    const customerEmail = typeof body.customer_email === 'string' ? body.customer_email.trim() : '';
     const insertPayload = {
       tool_id: body.tool_id,
       start_date: body.start_date,
       end_date: body.end_date,
       customer_name: body.customer_name,
-      customer_phone: body.customer_phone
+      customer_phone: body.customer_phone,
+      customer_email: customerEmail || null
     };
 
     const { data: created, error: createError } = await supabase
@@ -505,15 +492,15 @@ app.post('/api/contact', async (req, res) => {
     return;
   }
 
+  let emailSent = true;
   try {
     await sendContactEmail({ name, email, phone, message });
   } catch (emailError) {
-    console.error('[POST /api/contact] Email send error:', emailError?.message || emailError);
-    res.status(500).json({ ok: false, error: 'Failed to send contact email' });
-    return;
+    emailSent = false;
+    console.error('[POST /api/contact] Email send error (message saved successfully):', emailError?.message || emailError);
   }
 
-  res.json({ ok: true });
+  res.json({ ok: true, email_sent: emailSent });
 });
 
 app.put('/api/orders/:id', async (req, res) => {

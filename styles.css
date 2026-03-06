@@ -202,6 +202,7 @@ button,.btn{
 
 .calendar-legend{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0 2px;font-size:.92rem;color:#374151}
 .calendar-legend span{display:flex;align-items:center;gap:6px}
+.calendar-legend .legend-booked-label{text-decoration:line-through;text-decoration-thickness:1.3px}
 .legend-box{display:inline-block;width:16px;height:16px;border-radius:6px;border:1px solid rgba(0,0,0,.08)}
 .legend-available{background:rgba(56, 189, 248, 0.28)}
 .legend-booked{background:rgba(248, 113, 113, 0.28)}
