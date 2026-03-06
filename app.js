@@ -45,6 +45,11 @@ const toClientTool=(tool={})=>{
 
 const toServerToolPayload=(tool={})=>{
   const normalized=toClientTool(tool);
+  const busyDates=Array.isArray(normalized.busyDates)
+    ? normalized.busyDates.map((d)=>String(d||'').trim()).filter(Boolean)
+    : (Array.isArray(normalized.busydates)
+      ? normalized.busydates.map((d)=>String(d||'').trim()).filter(Boolean)
+      : []);
   return {
     name:normalized.name,
     category:normalized.category,
@@ -53,7 +58,8 @@ const toServerToolPayload=(tool={})=>{
     max_days:Number(normalized.maxDays||0),
     image_url:normalized.image_url||normalized.image||'',
     description:normalized.description||normalized.desc||'',
-    media_urls:Array.isArray(normalized.media_urls)?normalized.media_urls.filter(Boolean):[]
+    media_urls:Array.isArray(normalized.media_urls)?normalized.media_urls.filter(Boolean):[],
+    busyDates
   };
 };
 

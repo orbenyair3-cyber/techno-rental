@@ -112,7 +112,7 @@ function mapDbToolToClient(row) {
     image: row.image_url || row.image || '',
     desc: row.description || row.desc || '',
     media_urls: Array.isArray(row.media_urls) ? row.media_urls : [],
-    busyDates: Array.isArray(row.busydates) ? row.busydates : (Array.isArray(row.busyDates) ? row.busyDates : []),
+    busyDates: Array.isArray(row.busydates) ? row.busydates : [],
     status: row.is_available === false ? 'maintenance' : 'available'
   };
 }
@@ -128,7 +128,8 @@ function mapClientToolToDb(tool) {
     max_days: Number(tool.max_days ?? tool.maxDays ?? 0),
     image_url: tool.image_url || tool.image || mediaUrls[0] || null,
     description: tool.description || tool.desc || '',
-    media_urls: mediaUrls
+    media_urls: mediaUrls,
+    busydates: Array.isArray(tool.busyDates) ? tool.busyDates : (Array.isArray(tool.busydates) ? tool.busydates : [])
   };
 }
 
